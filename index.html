@@ -7032,10 +7032,10 @@ function generateActionPlan(r) {
 
 function speakActionPlan() {
   if (!_lastActionPlan) return;
-  // v10: route to Addis AI TTS for supported langs; fall back to browser TTS otherwise.
-  (['am','om','en'].includes(currentLang) && typeof ttsV2Speak === 'function')
-    ? ttsV2Speak(_lastActionPlan)
-    : speakText(_lastActionPlan);
+  // v12.1: smartSpeak handles ALL 6 languages (am→/api/tts audio, others→
+  // browser voice if present, else polite toast). Never silent.
+  if (typeof smartSpeak === 'function') { smartSpeak(_lastActionPlan, currentLang); }
+  else { speakText(_lastActionPlan); }
 }
 
 // ==================== SUSTAINABILITY SCORE ====================
@@ -7322,11 +7322,10 @@ function speakPhrase(key) {
   var lang = currentLang === 'am' ? 'am' : 'en';
   var phrases = PRELOAD_PHRASES[lang] || PRELOAD_PHRASES.en;
   var phrase = phrases.find(function(p) { return p.toLowerCase().includes(key.toLowerCase()); });
-  // v10: prefer Addis AI for am/om/en, else browser TTS.
+  // v12.1: route through smartSpeak (am→/api/tts audio, others→voice/toast).
   if (phrase) {
-    (['am','om','en'].includes(currentLang) && typeof ttsV2Speak === 'function')
-      ? ttsV2Speak(phrase)
-      : speakText(phrase);
+    if (typeof smartSpeak === 'function') { smartSpeak(phrase, currentLang); }
+    else { speakText(phrase); }
   }
 }
 
@@ -8998,6 +8997,18 @@ window.onload = () => {
   loadProfile();
   renderSymptoms();
   initVoice();
+  // v12.1: force browser SpeechSynthesis voices to load + log which of our 6
+  // languages have an installed device voice (helps diagnose why am/om/ti/so/aa
+  // fall through to /api/tts or a toast — most phones ship none of them).
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = function() {
+      const voices = window.speechSynthesis.getVoices() || [];
+      const interesting = ['en', 'am', 'om', 'ti', 'so', 'aa'];
+      const matched = voices.filter(v => interesting.some(l => v.lang.toLowerCase().startsWith(l)));
+      console.log('[TTS] browser voices loaded:', voices.length, '| Ethiopian-lang voices:', matched.map(v => v.lang + ' (' + v.name + ')').join(', ') || 'none');
+    };
+  }
   checkNetwork();
   const defaultCard = document.querySelector('.crop-card.selected');
   if (defaultCard) selectCrop(defaultCard);
@@ -9166,17 +9177,15 @@ function addChatMessage(text, role, id) {
     spk.className = 'chat-speaker-btn';
     spk.title = 'Listen';
     spk.textContent = '🔊';
-    // v10: chat speaker + auto-speak route to Addis AI for am/om/en.
+    // v12.1: chat speaker + auto-speak route through smartSpeak for all langs.
     spk.onclick = function() {
-      (['am','om','en'].includes(currentLang) && typeof ttsV2Speak === 'function')
-        ? ttsV2Speak(text, spk)
-        : speakText(text);
+      if (typeof smartSpeak === 'function') { smartSpeak(text, currentLang); }
+      else { speakText(text); }
     };
     div.appendChild(spk);
     if (window.chatAutoSpeak) {
-      (['am','om','en'].includes(currentLang) && typeof ttsV2Speak === 'function')
-        ? ttsV2Speak(text)
-        : speakText(text);
+      if (typeof smartSpeak === 'function') { smartSpeak(text, currentLang); }
+      else { speakText(text); }
     }
   } else {
     div.textContent = text;
@@ -9977,95 +9986,100 @@ function stopVoiceCapture() {
   stopBrowserRecognition();
 }
 
-// ====================== v6: TEXT-TO-SPEECH (Addis AI for am/om) ======================
-// Named ttsV2Speak to avoid colliding with the existing browser-only speakText().
-// v11: visible-error version. When Addis AI is down or the server has no
-// ADDIS_AI_API_KEY, the browser has no am/om voice → previously this fell
-// back silently. Now we always show a toast explaining the real reason.
-async function ttsV2Speak(text, btnEl) {
+// ====================== v12.1: TEXT-TO-SPEECH — smartSpeak fallback chain ======================
+// Addis AI (/api/v2/voice/speak) is discontinued (404 "Route not found", confirmed
+// via /api/v2/voice/diag) — so smartSpeak no longer touches it. Instead it routes
+// through the EXISTING, working /api/tts endpoint (Google Translate TTS), which
+// returns real MP3 audio for Amharic (verified live, ~20KB audio/mpeg). Oromo /
+// Tigrinya / Somali / Afar have no Google voice (503) and no browser voice on
+// virtually any phone, so they fall through to a polite localized toast.
+//
+// Order per language:
+//   en            → browser SpeechSynthesis (instant, reliable)
+//   am            → /api/tts (real audio) → browser voice → toast
+//   om/ti/so/aa   → /api/tts (in case Google adds voices) → browser voice → toast
+//
+// Guarantee: every tap produces audio OR a visible toast — never silent.
+async function smartSpeak(text, language) {
   if (!text) return;
-  const voiceLang = mapLangToVoice(currentLang || 'en');
+  language = language || (typeof currentLang !== 'undefined' ? currentLang : 'en');
 
-  // English: use free, fast browser TTS
-  if (voiceLang === 'en-US' && 'speechSynthesis' in window) {
+  // 1) English → browser SpeechSynthesis (unchanged, always-on path)
+  if (language === 'en' && 'speechSynthesis' in window) {
     try {
+      window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = voiceLang;
+      u.lang = 'en-US';
+      u.rate = 0.95;
       window.speechSynthesis.speak(u);
       return;
-    } catch (e) {
-      showTtsToast(getLangLabel('tts_playback_failed'));
-      return;
-    }
+    } catch (e) { /* fall through to chain */ }
   }
 
-  // Languages NOT in the Addis AI supported list — browser support is essentially nil
-  const ADDIS_LANGS = ['am-ET', 'om-ET', 'en-US'];
-  if (!ADDIS_LANGS.includes(voiceLang)) {
-    showTtsToast(getLangLabel('tts_not_available_lang'));
-    return;
-  }
-
-  // Amharic / Oromo: route through our server → Addis AI
-  if (btnEl) btnEl.disabled = true;
-  let serverErrorDetail = null;
-  try {
-    const r = await fetch('/api/v2/voice/speak', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text.slice(0, 1800), language: voiceLang })
-    });
-    if (!r.ok) {
-      let bodyTxt = '';
-      try { bodyTxt = await r.text(); } catch(e) {}
-      serverErrorDetail = 'HTTP ' + r.status + ': ' + bodyTxt.slice(0, 200);
-      throw new Error(serverErrorDetail);
-    }
-    const blob = await r.blob();
-    if (!blob || blob.size < 200) {
-      throw new Error('Empty audio response from server');
-    }
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.onended = () => URL.revokeObjectURL(url);
-    audio.onerror = () => {
-      URL.revokeObjectURL(url);
-      showTtsToast(getLangLabel('tts_playback_failed'));
-    };
-    await audio.play();
-  } catch (err) {
-    console.warn('[ttsV2Speak] Addis AI path failed:', err && err.message);
-    // Try browser TTS as a last resort — but only if a matching voice exists
-    let browserSpoke = false;
+  // 2) Server Google Translate TTS via /api/tts — real audio for Amharic today.
+  //    Cheap to attempt for any non-English lang: server returns 503 fast if no voice.
+  if (language !== 'en') {
     try {
-      if ('speechSynthesis' in window) {
-        const voices = window.speechSynthesis.getVoices();
-        const langPrefix = voiceLang.split('-')[0];
-        const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(langPrefix));
-        if (matchingVoice) {
-          const u = new SpeechSynthesisUtterance(text);
-          u.lang = voiceLang;
-          u.voice = matchingVoice;
-          window.speechSynthesis.speak(u);
-          browserSpoke = true;
+      const r = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: String(text).slice(0, 480), lang: language })
+      });
+      if (r.ok && (r.headers.get('content-type') || '').indexOf('audio') !== -1) {
+        const blob = await r.blob();
+        if (blob && blob.size > 500) {
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.onended = () => URL.revokeObjectURL(url);
+          audio.onerror = () => { URL.revokeObjectURL(url); };
+          await audio.play();
+          return;
         }
       }
-    } catch (e2) {}
-    if (!browserSpoke) {
-      // Surface the real reason
-      if (serverErrorDetail && serverErrorDetail.indexOf('503') !== -1) {
-        showTtsToast(getLangLabel('tts_not_configured'));
-      } else if (serverErrorDetail && serverErrorDetail.indexOf('502') !== -1) {
-        showTtsToast(getLangLabel('tts_upstream_failed'));
-      } else {
-        showTtsToast(getLangLabel('tts_unavailable_lang'));
-      }
+      // non-ok (e.g. 503 for om/ti/so) or non-audio → fall through
+    } catch (e) {
+      console.warn('[smartSpeak] /api/tts failed for', language, ':', e && e.message);
     }
+  }
+
+  // 3) Browser SpeechSynthesis for any language with a matching INSTALLED voice
+  if ('speechSynthesis' in window) {
+    const voices = window.speechSynthesis.getVoices() || [];
+    const langMap = {
+      en: ['en-US', 'en-GB', 'en'], am: ['am-ET', 'am'], om: ['om-ET', 'om'],
+      ti: ['ti-ET', 'ti-ER', 'ti'], so: ['so-SO', 'so'], aa: ['aa-ET', 'aa']
+    };
+    const cands = langMap[language] || [language];
+    const v = voices.find(vv => cands.some(c => vv.lang.toLowerCase().startsWith(c.toLowerCase())));
+    if (v) {
+      try {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.voice = v;
+        u.lang = v.lang;
+        u.rate = 0.9;
+        window.speechSynthesis.speak(u);
+        return;
+      } catch (e) { /* fall through to toast */ }
+    }
+  }
+
+  // 4) Nothing can speak → polite localized toast (never silent)
+  showTtsToast(getLangLabel('tts_unavailable_lang'));
+}
+window.smartSpeak = smartSpeak;
+
+// ttsV2Speak kept as a thin wrapper so every existing caller (inline
+// onclick="ttsV2Speak(...)" buttons + the upgraded speakText callers) routes
+// through smartSpeak automatically. Preserves the button disable/enable UX.
+async function ttsV2Speak(text, btnEl) {
+  if (btnEl) btnEl.disabled = true;
+  try {
+    await smartSpeak(text, (typeof currentLang !== 'undefined' ? currentLang : 'en'));
   } finally {
     if (btnEl) btnEl.disabled = false;
   }
 }
-
 window.ttsV2Speak = ttsV2Speak;
 
 // v11: visible toast helper for TTS failures (and reusable for other UI hints).
