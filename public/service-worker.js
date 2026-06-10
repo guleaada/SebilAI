@@ -1,16 +1,15 @@
 // ================================================================
-// SebilAI — Service Worker v9 + Push Notifications
-// v9 bumps the cache key because the v12 release renames the PWA
-// from "Resilience Guardian" to "SebilAI" (manifest.json name +
-// short_name), and the manifest is cached on install — without a
-// cache-key bump, existing installs would keep the old PWA name
-// in the launcher. v9 also picks up the fixed Treat/Source tab
-// renderer and the rebranded service-worker comment header.
-// SKIP_WAITING handler stays so the in-page "New version
-// available — tap to refresh" banner can force a waiting SW to
-// activate immediately via forceUpdateApp().
+// SebilAI — Service Worker v10 + Push Notifications
+// v10 bumps the cache key to force existing installs off stale HTML.
+// Reason: phones cached an older build whose founder bio/tagline was
+// being machine-translated at runtime (gtrans clobbered the clean
+// Amharic/Tigrinya into garbage — "ገንዘብ", "ጉሊላት ቃሲዬ"). The fix
+// (translateModals now skips the i18n-managed #about-bio/#about-job-title)
+// only takes effect once the cached HTML is replaced — hence this bump.
+// SKIP_WAITING handler stays so the in-page "New version available —
+// tap to refresh" banner can force a waiting SW to activate immediately.
 // ================================================================
-const CACHE_NAME = 'sebilai-v9';
+const CACHE_NAME = 'sebilai-v10';
 const PUSH_ICON  = '/icons/icon-192.png';
 
 // v7: crop preview images extracted from index.html base64. Precaching

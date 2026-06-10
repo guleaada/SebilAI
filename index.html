@@ -5295,6 +5295,13 @@ async function translateModals(lang) {
   // Translate about modal paragraphs
   document.querySelectorAll('#aboutModal p').forEach(async el => {
     if (el.children.length > 0) return; // skip if has child elements
+    // v12.2 FIX: never machine-translate the founder fields that setLanguage()
+    // already fills from the clean, hand-written T[lang] strings. gtrans was
+    // clobbering the Amharic/Tigrinya founder bio + tagline — and because the
+    // source is cached in a sticky data-en attribute, switching languages
+    // re-translated cross-language into garbage (e.g. "ገንቢ"→"ገንዘብ",
+    // "ጉልላት ካስዬ"→"ጉሊላት ቃሲዬ"). These ids are i18n-managed; leave them alone.
+    if (el.id === 'about-bio' || el.id === 'about-job-title') return;
     const orig = el.getAttribute('data-en') || el.textContent;
     if (!el.getAttribute('data-en')) el.setAttribute('data-en', orig);
     el.textContent = await gtrans(orig, gLang);
