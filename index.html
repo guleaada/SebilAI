@@ -3943,23 +3943,23 @@ textarea:focus { outline: none; border-color: var(--leaf-mid); }
 
       
       <div class="modal-section">
-        <h3 id="about-ver-title" id="about-version-title">Current Version</h3>
+        <h3 id="about-ver-title">Current Version</h3>
         <div style="background:#F5F5F0;border-radius:12px;padding:14px 16px;font-size:13px;color:var(--bark);line-height:1.8;">
-          <div><strong>Version:</strong> v3.0 &nbsp;·&nbsp; <strong>Knowledge base:</strong> 42+ peer-reviewed papers &amp; institutional sources (updated 2025)</div>
+          <div id="about-ver-line1"><strong>Version:</strong> v3.0 &nbsp;·&nbsp; <strong>Knowledge base:</strong> 42+ peer-reviewed papers &amp; institutional sources (updated 2025)</div>
           <div style="margin-top:10px;padding:10px;background:#f0f8eb;border-radius:8px;display:flex;align-items:center;justify-content:space-between;">
-            <span style="font-size:12px;color:#2D6A0A;">🔐 No tracking · No ads · Data on your device</span>
-            <span onclick="showPrivacy()" style="cursor:pointer;text-decoration:underline;font-weight:700;">Privacy Policy</span>
+            <span id="about-ver-privacy-text" style="font-size:12px;color:#2D6A0A;">🔐 No tracking · No ads · Data on your device</span>
+            <span id="about-ver-privacy-link" onclick="showPrivacy()" style="cursor:pointer;text-decoration:underline;font-weight:700;">Privacy Policy</span>
           </div>
-          <div><strong>Languages:</strong> 6 &nbsp;·&nbsp; <strong>Crops:</strong> 11</div>
-          <div><strong>Status:</strong> Online prototype — seeking agronomist validation and farmer testing</div>
-          <div><strong>Goal:</strong> Test with 20–50 real farmers across Kaffa, Siltie, Gurage, Arsi, Tigray, Jimma, Oromia, Amhara, and SNNPR zones</div>
+          <div id="about-ver-langs"><strong>Languages:</strong> 6 &nbsp;·&nbsp; <strong>Crops:</strong> 11</div>
+          <div id="about-ver-status"><strong>Status:</strong> Online prototype — seeking agronomist validation and farmer testing</div>
+          <div id="about-ver-goal"><strong>Goal:</strong> Test with 20–50 real farmers across Kaffa, Siltie, Gurage, Arsi, Tigray, Jimma, Oromia, Amhara, and SNNPR zones</div>
         </div>
       </div>
 
       
       <div class="modal-section">
-        <h3 id="about-disc-title" id="about-disc-title">Disclaimer</h3>
-        <div style="background:#FFF8EC;border:1px solid #F0D080;border-radius:12px;padding:14px 16px;font-size:13px;color:#7A5A00;line-height:1.7;">
+        <h3 id="about-disc-title">Disclaimer</h3>
+        <div id="about-disc-text" style="background:#FFF8EC;border:1px solid #F0D080;border-radius:12px;padding:14px 16px;font-size:13px;color:#7A5A00;line-height:1.7;">
           SebilAI is an AI-assisted advisory tool based on published research. It is not a substitute for professional agronomic advice. Always verify critical decisions with your local Development Agent (DA) or the nearest Agricultural Research Center. The AI can make mistakes — especially without a photo or with ambiguous symptoms.
         </div>
       </div>
@@ -5328,17 +5328,31 @@ const ABOUT_PARAS = {
     'about-why-p2': "SebilAI fills that gap — built by Gulilat Kasiye Worku, an Ethiopian developer, for Ethiopian farmers, using Ethiopian science.",
     'about-diff-p1': "<strong>Local research:</strong> Every piece of advice cites real Ethiopian papers and institutions — not a global dataset. The app knows that community rouging in Siltie Zone reduced Enset disease from 65.7% to 5.6%; that Northern Leaf Blight causes 20–50% maize yield loss in Oromia; that Coffee Berry Disease destroys 48.7% of untreated berries in Kaffa and Jimma; that Net Blotch affects 79.2% of surveyed barley fields; that Anthracnose causes 50–87% sorghum yield loss in Tigray; and that Late Blight devastates highland potato in Amhara and Arsi.",
     'about-diff-p2': "<strong>4 Ethiopian languages:</strong> Full advice in English, አማርኛ, Afaan Oromo, and ትግርኛ — so the app is useful from Kaffa to Tigray, from Jimma to Gondar.",
-    'about-diff-p3': "<strong>Image analysis:</strong> Upload a photo of your plant and the AI visually inspects it for disease signs alongside your reported symptoms."
+    'about-diff-p3': "<strong>Image analysis:</strong> Upload a photo of your plant and the AI visually inspects it for disease signs alongside your reported symptoms.",
+    'about-ver-line1': "<strong>Version:</strong> v3.0 &nbsp;·&nbsp; <strong>Knowledge base:</strong> 42+ peer-reviewed papers &amp; institutional sources (updated 2025)",
+    'about-ver-privacy-text': "🔐 No tracking · No ads · Data on your device",
+    'about-ver-privacy-link': "Privacy Policy",
+    'about-ver-langs': "<strong>Languages:</strong> 6 &nbsp;·&nbsp; <strong>Crops:</strong> 11",
+    'about-ver-status': "<strong>Status:</strong> Online prototype — seeking agronomist validation and farmer testing",
+    'about-ver-goal': "<strong>Goal:</strong> Test with 20–50 real farmers across Kaffa, Siltie, Gurage, Arsi, Tigray, Jimma, Oromia, Amhara, and SNNPR zones",
+    'about-disc-text': "SebilAI is an AI-assisted advisory tool based on published research. It is not a substitute for professional agronomic advice. Always verify critical decisions with your local Development Agent (DA) or the nearest Agricultural Research Center. The AI can make mistakes — especially without a photo or with ambiguous symptoms."
   },
   am: {
     'about-why-p1': "እንደ Plantix፣ Nuru እና Tumaini ያሉ ነባር የሰብል በሽታ መተግበሪያዎች ጥሩ መሣሪያዎች ናቸው — ነገር ግን ለዓለም አቀፍ ወይም ከሰሃራ በታች ላሉ አጠቃላይ ሰብሎች የተሠሩ ናቸው። አንዳቸውም በ<strong>እንሰት</strong> ላይ አያተኩሩም — ይህ ለ20+ ሚሊዮን ሰዎች የኢትዮጵያ ዋነኛ የምግብ ዋስትና ሰብል ነው። አንዳቸውም በ<strong>አፋን ኦሮሞ ወይም ትግርኛ</strong> ምክር አይሰጡም። አንዳቸውም እንደ EIAR፣ ጅማ ዩኒቨርሲቲ፣ ቦንጋ ዩኒቨርሲቲ ወይም ወራቤ የግብርና ምርምር ማዕከል ካሉ <strong>የኢትዮጵያ ተቋማት</strong> ምርምርን አይጠቀሙም።",
     'about-why-p2': "SebilAI ያንን ክፍተት ይሞላል — በኢትዮጵያዊው አበልጻጊ ጉልላት ካስዬ ወርቁ፣ ለኢትዮጵያ ገበሬዎች፣ የኢትዮጵያን ሳይንስ በመጠቀም የተሠራ።",
     'about-diff-p1': "<strong>የአካባቢ ምርምር:</strong> እያንዳንዱ ምክር ከዓለም አቀፍ የውሂብ ስብስብ ሳይሆን ከእውነተኛ የኢትዮጵያ ጥናቶችና ተቋማት የተወሰደ ነው። መተግበሪያው የሚከተሉትን ያውቃል — በስልጤ ዞን የማኅበረሰብ ሩጊንግ (roguing) የእንሰት በሽታን ከ65.7% ወደ 5.6% እንደቀነሰ፤ Northern Leaf Blight በኦሮሚያ ከ20–50% የበቆሎ ምርት ኪሳራ እንደሚያስከትል፤ Coffee Berry Disease በካፋና ጅማ ካልታከሙ ፍሬዎች 48.7% እንደሚያጠፋ፤ Net Blotch በተጠኑ የገብስ እርሻዎች 79.2% እንደሚጎዳ፤ Anthracnose በትግራይ ከ50–87% የማሽላ ምርት ኪሳራ እንደሚያስከትል፤ እና Late Blight በአማራና አርሲ የደጋ ድንችን እንደሚያወድም።",
     'about-diff-p2': "<strong>4 የኢትዮጵያ ቋንቋዎች:</strong> ሙሉ ምክር በእንግሊዝኛ፣ በአማርኛ፣ በአፋን ኦሮሞ እና በትግርኛ ይቀርባል — ስለዚህ መተግበሪያው ከካፋ እስከ ትግራይ፣ ከጅማ እስከ ጎንደር ጠቃሚ ነው።",
-    'about-diff-p3': "<strong>የምስል ትንተና:</strong> የእጽዋትዎን ፎቶ ይስቀሉ፤ AI ከገለጹት ምልክቶች ጎን ለጎን የበሽታ ምልክቶችን በዓይነ ምስል ይመረምራል።"
+    'about-diff-p3': "<strong>የምስል ትንተና:</strong> የእጽዋትዎን ፎቶ ይስቀሉ፤ AI ከገለጹት ምልክቶች ጎን ለጎን የበሽታ ምልክቶችን በዓይነ ምስል ይመረምራል።",
+    'about-ver-line1': "<strong>ስሪት:</strong> v3.0 &nbsp;·&nbsp; <strong>የእውቀት መሠረት:</strong> 42+ በአቻ የተገመገሙ ጽሑፎች እና የተቋማት ምንጮች (በ2025 የተዘመነ)",
+    'about-ver-privacy-text': "🔐 ምንም ክትትል · ምንም ማስታወቂያ · ውሂብ በመሣሪያዎ ላይ",
+    'about-ver-privacy-link': "የግላዊነት ፖሊሲ",
+    'about-ver-langs': "<strong>ቋንቋዎች:</strong> 6 &nbsp;·&nbsp; <strong>ሰብሎች:</strong> 11",
+    'about-ver-status': "<strong>ሁኔታ:</strong> የመስመር ላይ ናሙና (ፕሮቶታይፕ) — የግብርና ባለሙያ ማረጋገጫና የገበሬ ሙከራ በመፈለግ ላይ",
+    'about-ver-goal': "<strong>ግብ:</strong> በካፋ፣ ስልጤ፣ ጉራጌ፣ አርሲ፣ ትግራይ፣ ጅማ፣ ኦሮሚያ፣ አማራ እና ደቡብ ብሔሮች (SNNPR) ዞኖች ከ20–50 እውነተኛ ገበሬዎች ጋር መሞከር",
+    'about-disc-text': "SebilAI በታተመ ምርምር ላይ የተመሠረተ በ AI የታገዘ የምክር መሣሪያ ነው። የባለሙያ የግብርና ምክርን አይተካም። ወሳኝ ውሳኔዎችን ሁልጊዜ ከአካባቢዎ የልማት ሠራተኛ (DA) ወይም ከቅርብ የግብርና ምርምር ማዕከል ጋር ያረጋግጡ። AI ስህተት ሊሠራ ይችላል — በተለይ ያለ ፎቶ ወይም ግልጽ ያልሆኑ ምልክቶች ሲኖሩ።"
   }
 };
-const ABOUT_PARA_IDS = ['about-why-p1','about-why-p2','about-diff-p1','about-diff-p2','about-diff-p3'];
+const ABOUT_PARA_IDS = ['about-why-p1','about-why-p2','about-diff-p1','about-diff-p2','about-diff-p3','about-ver-line1','about-ver-privacy-text','about-ver-privacy-link','about-ver-langs','about-ver-status','about-ver-goal','about-disc-text'];
 
 function setLanguage(lang) {
   currentLang = lang;
