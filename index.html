@@ -3933,11 +3933,11 @@ textarea:focus { outline: none; border-color: var(--leaf-mid); }
 
       
       <div class="modal-section">
-        <h3 id="about-diff-title" id="about-diff-title">What Makes It Different</h3>
+        <h3 id="about-diff-title">What Makes It Different</h3>
         <div style="background:white;border:1px solid #EAE4DC;border-radius:12px;padding:16px;">
-          <p style="font-size:13px;line-height:1.7;color:var(--bark);margin-bottom:10px;"><strong>Local research:</strong> Every piece of advice cites real Ethiopian papers and institutions — not a global dataset. The app knows that community rouging in Siltie Zone reduced Enset disease from 65.7% to 5.6%; that Northern Leaf Blight causes 20–50% maize yield loss in Oromia; that Coffee Berry Disease destroys 48.7% of untreated berries in Kaffa and Jimma; that Net Blotch affects 79.2% of surveyed barley fields; that Anthracnose causes 50–87% sorghum yield loss in Tigray; and that Late Blight devastates highland potato in Amhara and Arsi.</p>
-          <p style="font-size:13px;line-height:1.7;color:var(--bark);margin-bottom:10px;"><strong>4 Ethiopian languages:</strong> Full advice in English, አማርኛ, Afaan Oromo, and ትግርኛ — so the app is useful from Kaffa to Tigray, from Jimma to Gondar.</p>
-          <p style="font-size:13px;line-height:1.7;color:var(--bark);"><strong>Image analysis:</strong> Upload a photo of your plant and the AI visually inspects it for disease signs alongside your reported symptoms.</p>
+          <p id="about-diff-p1" style="font-size:13px;line-height:1.7;color:var(--bark);margin-bottom:10px;"><strong>Local research:</strong> Every piece of advice cites real Ethiopian papers and institutions — not a global dataset. The app knows that community rouging in Siltie Zone reduced Enset disease from 65.7% to 5.6%; that Northern Leaf Blight causes 20–50% maize yield loss in Oromia; that Coffee Berry Disease destroys 48.7% of untreated berries in Kaffa and Jimma; that Net Blotch affects 79.2% of surveyed barley fields; that Anthracnose causes 50–87% sorghum yield loss in Tigray; and that Late Blight devastates highland potato in Amhara and Arsi.</p>
+          <p id="about-diff-p2" style="font-size:13px;line-height:1.7;color:var(--bark);margin-bottom:10px;"><strong>4 Ethiopian languages:</strong> Full advice in English, አማርኛ, Afaan Oromo, and ትግርኛ — so the app is useful from Kaffa to Tigray, from Jimma to Gondar.</p>
+          <p id="about-diff-p3" style="font-size:13px;line-height:1.7;color:var(--bark);"><strong>Image analysis:</strong> Upload a photo of your plant and the AI visually inspects it for disease signs alongside your reported symptoms.</p>
         </div>
       </div>
 
@@ -5311,21 +5311,34 @@ async function translateModals(lang) {
   });
 }
 
-// v12.2: hand-authored "Why This Was Built" paragraphs. Stored here (not in T)
-// so they can carry <strong> markup. Only `en` + `am` are authored; other
-// languages fall back to the English source and keep machine-translation.
-// NOTE (am): drafted with the canonical founder name (ጉልላት ካስዬ ወርቁ) and
-// አበልጻጊ — open to native-speaker wording tweaks.
-const WHY_PARAS = {
+// v12.2: hand-authored About-modal paragraphs, keyed by element id. Stored
+// here (not in T) so they can carry <strong> markup. These paragraphs have
+// bold lead-ins, so translateModals() skipped them (children.length>0) and
+// they were stuck in English. setLanguage applies a hand version when one
+// exists and marks it data-i18n-managed so gtrans leaves it alone; languages
+// without a hand version reset to the English source and keep machine
+// translation — no regression.
+// NOTE (am): drafts pending native-speaker review. Decisions: statistics &
+// institution acronyms (EIAR) kept as-is; disease names kept in English
+// (Northern Leaf Blight, Coffee Berry Disease, Net Blotch, Anthracnose, Late
+// Blight) to avoid mistranslating agronomic terms — localise if preferred.
+const ABOUT_PARAS = {
   en: {
-    p1: "Existing crop disease apps like Plantix, Nuru, and Tumaini are powerful tools — but they are built for global or sub-Saharan general crops. None of them focus on <strong>Enset</strong>, Ethiopia's most important food security crop for 20+ million people. None give advice in <strong>Afaan Oromo or Tigrinya</strong>. None use research from <strong>Ethiopian institutions</strong> like EIAR, Jimma University, Bonga University, or Werabe Agricultural Research Centre.",
-    p2: "SebilAI fills that gap — built by Gulilat Kasiye Worku, an Ethiopian developer, for Ethiopian farmers, using Ethiopian science."
+    'about-why-p1': "Existing crop disease apps like Plantix, Nuru, and Tumaini are powerful tools — but they are built for global or sub-Saharan general crops. None of them focus on <strong>Enset</strong>, Ethiopia's most important food security crop for 20+ million people. None give advice in <strong>Afaan Oromo or Tigrinya</strong>. None use research from <strong>Ethiopian institutions</strong> like EIAR, Jimma University, Bonga University, or Werabe Agricultural Research Centre.",
+    'about-why-p2': "SebilAI fills that gap — built by Gulilat Kasiye Worku, an Ethiopian developer, for Ethiopian farmers, using Ethiopian science.",
+    'about-diff-p1': "<strong>Local research:</strong> Every piece of advice cites real Ethiopian papers and institutions — not a global dataset. The app knows that community rouging in Siltie Zone reduced Enset disease from 65.7% to 5.6%; that Northern Leaf Blight causes 20–50% maize yield loss in Oromia; that Coffee Berry Disease destroys 48.7% of untreated berries in Kaffa and Jimma; that Net Blotch affects 79.2% of surveyed barley fields; that Anthracnose causes 50–87% sorghum yield loss in Tigray; and that Late Blight devastates highland potato in Amhara and Arsi.",
+    'about-diff-p2': "<strong>4 Ethiopian languages:</strong> Full advice in English, አማርኛ, Afaan Oromo, and ትግርኛ — so the app is useful from Kaffa to Tigray, from Jimma to Gondar.",
+    'about-diff-p3': "<strong>Image analysis:</strong> Upload a photo of your plant and the AI visually inspects it for disease signs alongside your reported symptoms."
   },
   am: {
-    p1: "እንደ Plantix፣ Nuru እና Tumaini ያሉ ነባር የሰብል በሽታ መተግበሪያዎች ጥሩ መሣሪያዎች ናቸው — ነገር ግን ለዓለም አቀፍ ወይም ከሰሃራ በታች ላሉ አጠቃላይ ሰብሎች የተሠሩ ናቸው። አንዳቸውም በ<strong>እንሰት</strong> ላይ አያተኩሩም — ይህ ለ20+ ሚሊዮን ሰዎች የኢትዮጵያ ዋነኛ የምግብ ዋስትና ሰብል ነው። አንዳቸውም በ<strong>አፋን ኦሮሞ ወይም ትግርኛ</strong> ምክር አይሰጡም። አንዳቸውም እንደ EIAR፣ ጅማ ዩኒቨርሲቲ፣ ቦንጋ ዩኒቨርሲቲ ወይም ወራቤ የግብርና ምርምር ማዕከል ካሉ <strong>የኢትዮጵያ ተቋማት</strong> ምርምርን አይጠቀሙም።",
-    p2: "SebilAI ያንን ክፍተት ይሞላል — በኢትዮጵያዊው አበልጻጊ ጉልላት ካስዬ ወርቁ፣ ለኢትዮጵያ ገበሬዎች፣ የኢትዮጵያን ሳይንስ በመጠቀም የተሠራ።"
+    'about-why-p1': "እንደ Plantix፣ Nuru እና Tumaini ያሉ ነባር የሰብል በሽታ መተግበሪያዎች ጥሩ መሣሪያዎች ናቸው — ነገር ግን ለዓለም አቀፍ ወይም ከሰሃራ በታች ላሉ አጠቃላይ ሰብሎች የተሠሩ ናቸው። አንዳቸውም በ<strong>እንሰት</strong> ላይ አያተኩሩም — ይህ ለ20+ ሚሊዮን ሰዎች የኢትዮጵያ ዋነኛ የምግብ ዋስትና ሰብል ነው። አንዳቸውም በ<strong>አፋን ኦሮሞ ወይም ትግርኛ</strong> ምክር አይሰጡም። አንዳቸውም እንደ EIAR፣ ጅማ ዩኒቨርሲቲ፣ ቦንጋ ዩኒቨርሲቲ ወይም ወራቤ የግብርና ምርምር ማዕከል ካሉ <strong>የኢትዮጵያ ተቋማት</strong> ምርምርን አይጠቀሙም።",
+    'about-why-p2': "SebilAI ያንን ክፍተት ይሞላል — በኢትዮጵያዊው አበልጻጊ ጉልላት ካስዬ ወርቁ፣ ለኢትዮጵያ ገበሬዎች፣ የኢትዮጵያን ሳይንስ በመጠቀም የተሠራ።",
+    'about-diff-p1': "<strong>የአካባቢ ምርምር:</strong> እያንዳንዱ ምክር ከዓለም አቀፍ የውሂብ ስብስብ ሳይሆን ከእውነተኛ የኢትዮጵያ ጥናቶችና ተቋማት የተወሰደ ነው። መተግበሪያው የሚከተሉትን ያውቃል — በስልጤ ዞን የማኅበረሰብ ሩጊንግ (roguing) የእንሰት በሽታን ከ65.7% ወደ 5.6% እንደቀነሰ፤ Northern Leaf Blight በኦሮሚያ ከ20–50% የበቆሎ ምርት ኪሳራ እንደሚያስከትል፤ Coffee Berry Disease በካፋና ጅማ ካልታከሙ ፍሬዎች 48.7% እንደሚያጠፋ፤ Net Blotch በተጠኑ የገብስ እርሻዎች 79.2% እንደሚጎዳ፤ Anthracnose በትግራይ ከ50–87% የማሽላ ምርት ኪሳራ እንደሚያስከትል፤ እና Late Blight በአማራና አርሲ የደጋ ድንችን እንደሚያወድም።",
+    'about-diff-p2': "<strong>4 የኢትዮጵያ ቋንቋዎች:</strong> ሙሉ ምክር በእንግሊዝኛ፣ በአማርኛ፣ በአፋን ኦሮሞ እና በትግርኛ ይቀርባል — ስለዚህ መተግበሪያው ከካፋ እስከ ትግራይ፣ ከጅማ እስከ ጎንደር ጠቃሚ ነው።",
+    'about-diff-p3': "<strong>የምስል ትንተና:</strong> የእጽዋትዎን ፎቶ ይስቀሉ፤ AI ከገለጹት ምልክቶች ጎን ለጎን የበሽታ ምልክቶችን በዓይነ ምስል ይመረምራል።"
   }
 };
+const ABOUT_PARA_IDS = ['about-why-p1','about-why-p2','about-diff-p1','about-diff-p2','about-diff-p3'];
 
 function setLanguage(lang) {
   currentLang = lang;
@@ -5441,24 +5454,27 @@ function setLanguage(lang) {
   setText('about-lang-pill', t.aboutLangPill || '🇬🇧 English');
   setText('about-bio',       t.aboutBio      || (T.en && T.en.aboutBio) || '');
 
-  // v12.2: "Why This Was Built" paragraphs. p1 has <strong> so translateModals
-  // skipped it (stuck English); p2 was machine-translated → garbled founder
-  // name. Render hand-authored text per language when available and mark those
-  // as i18n-managed so gtrans leaves them alone. Languages without a hand
-  // version reset to the English source and keep the existing machine-translate
-  // behaviour (no regression). Uses innerHTML to preserve the <strong> emphasis.
+  // v12.2: About-modal paragraphs with bold lead-ins (Why-built + What-makes-
+  // it-different). translateModals() skips them (children>0) so they were stuck
+  // in English; the plain ones got machine-translated and garbled. Apply the
+  // hand-authored version for the current language when one exists and mark it
+  // data-i18n-managed so gtrans skips it. Languages without a hand version fall
+  // back to the English source and keep machine translation (no regression).
+  // innerHTML preserves the <strong> emphasis.
   (function() {
-    var wp = (typeof WHY_PARAS !== 'undefined' && WHY_PARAS[lang]) ? WHY_PARAS[lang] : null;
-    var p1 = document.getElementById('about-why-p1');
-    var p2 = document.getElementById('about-why-p2');
-    if (p1) {
-      p1.innerHTML = (wp && wp.p1) || WHY_PARAS.en.p1;
-      if (wp && wp.p1) p1.setAttribute('data-i18n-managed', '1'); else p1.removeAttribute('data-i18n-managed');
-    }
-    if (p2) {
-      p2.innerHTML = (wp && wp.p2) || WHY_PARAS.en.p2;
-      if (wp && wp.p2) p2.setAttribute('data-i18n-managed', '1'); else p2.removeAttribute('data-i18n-managed');
-    }
+    if (typeof ABOUT_PARAS === 'undefined' || typeof ABOUT_PARA_IDS === 'undefined') return;
+    var hand = ABOUT_PARAS[lang] || null;
+    ABOUT_PARA_IDS.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      if (hand && hand[id]) {
+        el.innerHTML = hand[id];
+        el.setAttribute('data-i18n-managed', '1');
+      } else {
+        el.innerHTML = ABOUT_PARAS.en[id];
+        el.removeAttribute('data-i18n-managed');
+      }
+    });
   })();
 
   // Re-render symptoms in new language
