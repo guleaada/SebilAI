@@ -3924,10 +3924,10 @@ textarea:focus { outline: none; border-color: var(--leaf-mid); }
 
       
       <div class="modal-section">
-        <h3 id="about-why-title" id="about-why-title">Why This Was Built</h3>
+        <h3 id="about-why-title">Why This Was Built</h3>
         <div style="background:white;border:1px solid #EAE4DC;border-radius:12px;padding:16px;">
-          <p style="font-size:13px;line-height:1.7;color:var(--bark);">Existing crop disease apps like Plantix, Nuru, and Tumaini are powerful tools — but they are built for global or sub-Saharan general crops. None of them focus on <strong>Enset</strong>, Ethiopia's most important food security crop for 20+ million people. None give advice in <strong>Afaan Oromo or Tigrinya</strong>. None use research from <strong>Ethiopian institutions</strong> like EIAR, Jimma University, Bonga University, or Werabe Agricultural Research Centre.</p>
-          <p style="font-size:13px;line-height:1.7;color:var(--bark);margin-top:10px;">SebilAI fills that gap — built by Gulilat Kasiye Worku, an Ethiopian developer, for Ethiopian farmers, using Ethiopian science.</p>
+          <p id="about-why-p1" style="font-size:13px;line-height:1.7;color:var(--bark);">Existing crop disease apps like Plantix, Nuru, and Tumaini are powerful tools — but they are built for global or sub-Saharan general crops. None of them focus on <strong>Enset</strong>, Ethiopia's most important food security crop for 20+ million people. None give advice in <strong>Afaan Oromo or Tigrinya</strong>. None use research from <strong>Ethiopian institutions</strong> like EIAR, Jimma University, Bonga University, or Werabe Agricultural Research Centre.</p>
+          <p id="about-why-p2" style="font-size:13px;line-height:1.7;color:var(--bark);margin-top:10px;">SebilAI fills that gap — built by Gulilat Kasiye Worku, an Ethiopian developer, for Ethiopian farmers, using Ethiopian science.</p>
         </div>
       </div>
 
@@ -5302,11 +5302,30 @@ async function translateModals(lang) {
     // re-translated cross-language into garbage (e.g. "ገንቢ"→"ገንዘብ",
     // "ጉልላት ካስዬ"→"ጉሊላት ቃሲዬ"). These ids are i18n-managed; leave them alone.
     if (el.id === 'about-bio' || el.id === 'about-job-title') return;
+    // v12.2: skip any element setLanguage filled with a hand-authored
+    // translation (e.g. the "Why This Was Built" paragraphs for Amharic).
+    if (el.getAttribute('data-i18n-managed') === '1') return;
     const orig = el.getAttribute('data-en') || el.textContent;
     if (!el.getAttribute('data-en')) el.setAttribute('data-en', orig);
     el.textContent = await gtrans(orig, gLang);
   });
 }
+
+// v12.2: hand-authored "Why This Was Built" paragraphs. Stored here (not in T)
+// so they can carry <strong> markup. Only `en` + `am` are authored; other
+// languages fall back to the English source and keep machine-translation.
+// NOTE (am): drafted with the canonical founder name (ጉልላት ካስዬ ወርቁ) and
+// አበልጻጊ — open to native-speaker wording tweaks.
+const WHY_PARAS = {
+  en: {
+    p1: "Existing crop disease apps like Plantix, Nuru, and Tumaini are powerful tools — but they are built for global or sub-Saharan general crops. None of them focus on <strong>Enset</strong>, Ethiopia's most important food security crop for 20+ million people. None give advice in <strong>Afaan Oromo or Tigrinya</strong>. None use research from <strong>Ethiopian institutions</strong> like EIAR, Jimma University, Bonga University, or Werabe Agricultural Research Centre.",
+    p2: "SebilAI fills that gap — built by Gulilat Kasiye Worku, an Ethiopian developer, for Ethiopian farmers, using Ethiopian science."
+  },
+  am: {
+    p1: "እንደ Plantix፣ Nuru እና Tumaini ያሉ ነባር የሰብል በሽታ መተግበሪያዎች ኃይለኛ መሣሪያዎች ናቸው — ነገር ግን ለዓለም አቀፍ ወይም ከሰሃራ በታች ላሉ አጠቃላይ ሰብሎች የተሠሩ ናቸው። አንዳቸውም በ<strong>እንሰት</strong> ላይ አያተኩሩም — ይህ ለ20+ ሚሊዮን ሰዎች የኢትዮጵያ ዋነኛ የምግብ ዋስትና ሰብል ነው። አንዳቸውም በ<strong>አፋን ኦሮሞ ወይም ትግርኛ</strong> ምክር አይሰጡም። አንዳቸውም እንደ EIAR፣ ጅማ ዩኒቨርሲቲ፣ ቦንጋ ዩኒቨርሲቲ ወይም ወራቤ የግብርና ምርምር ማዕከል ካሉ <strong>የኢትዮጵያ ተቋማት</strong> ምርምርን አይጠቀሙም።",
+    p2: "SebilAI ያንን ክፍተት ይሞላል — በኢትዮጵያዊው አበልጻጊ ጉልላት ካስዬ ወርቁ፣ ለኢትዮጵያ ገበሬዎች፣ የኢትዮጵያን ሳይንስ በመጠቀም የተሠራ።"
+  }
+};
 
 function setLanguage(lang) {
   currentLang = lang;
@@ -5421,6 +5440,26 @@ function setLanguage(lang) {
   setText('about-brand',     t.aboutBrand    || 'SebilAI');
   setText('about-lang-pill', t.aboutLangPill || '🇬🇧 English');
   setText('about-bio',       t.aboutBio      || (T.en && T.en.aboutBio) || '');
+
+  // v12.2: "Why This Was Built" paragraphs. p1 has <strong> so translateModals
+  // skipped it (stuck English); p2 was machine-translated → garbled founder
+  // name. Render hand-authored text per language when available and mark those
+  // as i18n-managed so gtrans leaves them alone. Languages without a hand
+  // version reset to the English source and keep the existing machine-translate
+  // behaviour (no regression). Uses innerHTML to preserve the <strong> emphasis.
+  (function() {
+    var wp = (typeof WHY_PARAS !== 'undefined' && WHY_PARAS[lang]) ? WHY_PARAS[lang] : null;
+    var p1 = document.getElementById('about-why-p1');
+    var p2 = document.getElementById('about-why-p2');
+    if (p1) {
+      p1.innerHTML = (wp && wp.p1) || WHY_PARAS.en.p1;
+      if (wp && wp.p1) p1.setAttribute('data-i18n-managed', '1'); else p1.removeAttribute('data-i18n-managed');
+    }
+    if (p2) {
+      p2.innerHTML = (wp && wp.p2) || WHY_PARAS.en.p2;
+      if (wp && wp.p2) p2.setAttribute('data-i18n-managed', '1'); else p2.removeAttribute('data-i18n-managed');
+    }
+  })();
 
   // Re-render symptoms in new language
   if (typeof renderSymptoms === 'function') renderSymptoms();
