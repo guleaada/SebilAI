@@ -161,24 +161,28 @@ Three separate installable PWAs:
 | Voice STT | Web Speech API (EN/SO native, AI-translated for others) |
 | Push Notifications | Web Push + VAPID |
 | SMS | Africa's Talking — send + receive diagnosis |
-| Backend | Node.js + Express v3.2 — 41 endpoints |
-| Database | SQLite (better-sqlite3) |
-| Offline | IndexedDB v5 (7 stores) + Service Worker v4 |
+| Backend | Node.js + Express v3.2 — 44 endpoints |
+| Database | SQLite (better-sqlite3 sync + sqlite3 async, WAL mode) |
+| Offline | IndexedDB + Service Worker v5 |
 | Domain | **sebilai.com** |
 | Hosting | Render.com + GitHub CI/CD |
 | Uptime | cron-job.org pings `/api/health` every 10 min |
 
 ---
 
-## 🔌 API Reference (41 Endpoints)
+## 🔌 API Reference (44 Endpoints)
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/analyze` | POST | Main AI diagnosis (image + symptoms) |
-| `/api/satellite-risk` | GET | GEE NDVI field analysis |
+| `/api/analyze` | POST | Main AI diagnosis (image + symptoms) — triple AI fallback |
+| `/api/satellite-risk` | GET | GEE NDVI field analysis (Sentinel-2) |
 | `/api/weather` | GET | Open-Meteo weather proxy |
 | `/api/forecast` | GET | 14-day disease risk forecast |
 | `/api/market-price` | GET | ECX crop price data |
+| `/api/rotation-advice` | GET | **NEW** Research-based crop rotation advisor (11 crops, 42+ papers) |
+| `/api/dosage-calc` | GET | **NEW** Chemical dosage calculator — exact ml/g per knapsack tank |
+| `/api/dosage-calc/chemicals` | GET | **NEW** List available chemicals/pesticides |
+| `/api/harvest-readiness` | GET | **NEW** Harvest timing advisor with weather integration |
 | `/api/community-report` | POST | Submit anonymized disease report |
 | `/api/community-reports` | GET | Heatmap data (last 30 days) |
 | `/api/outbreak-alerts` | GET | Active outbreak alerts |
@@ -198,9 +202,21 @@ Three separate installable PWAs:
 | `/api/send-sms` | POST | Outbound SMS alerts |
 | `/api/tts` | POST | Text-to-speech proxy |
 | `/api/push-subscribe` | POST | Register push subscriber |
-| `/api/translate` | POST | AI translation proxy |
+| `/api/push-unsubscribe` | POST | Remove push subscriber |
+| `/api/push-update` | POST | Update subscriber region/crop preferences |
+| `/api/sms-subscribe` | POST | Subscribe phone to SMS alerts |
+| `/api/sms-unsubscribe` | POST | Unsubscribe phone from SMS alerts |
+| `/api/translate` | POST | Translation proxy |
 | `/api/feedback` | POST/GET | Farmer feedback |
 | `/api/health` | GET | Service health check |
+| `/api/v2/auth/register` | POST | Create agronomist/admin user |
+| `/api/v2/auth/login` | POST | JWT login |
+| `/api/v2/crops` | GET | List crops from DB |
+| `/api/v2/crops/:id/diseases` | GET | List diseases per crop |
+| `/api/v2/diagnoses` | POST/GET | Log & retrieve structured diagnoses |
+| `/api/v2/stats` | GET | Aggregate diagnosis statistics |
+| `/api/v2/outbreaks/map` | GET | GeoJSON outbreak heatmap |
+| `/api/drone-upload` | POST | Drone image analysis (aerial view) |
 
 ---
 
@@ -210,9 +226,9 @@ Three separate installable PWAs:
 git clone https://github.com/guleaada/SebilAI.git
 cd SebilAI
 npm install
-cp .env.example .env
-# Add your API keys (see below)
-node server.js
+cp .env.example .env   # .env.example is in the repository root
+# Edit .env and add your API keys (see table below)
+node server.js         # Database tables are auto-created on first run
 # Open: http://localhost:3000
 ```
 
@@ -284,6 +300,12 @@ If you would like to partner — review, validate, or pilot SebilAI — please r
 - [x] PDF impact report download
 - [x] 3 installable PWAs (Farmer · Admin · Agronomist)
 - [x] **sebilai.com** custom domain live
+- [x] **Crop Rotation Advisor** — 11-crop rotation plans backed by 42+ Ethiopian research papers
+- [x] **Chemical Dosage Calculator** — exact ml/g per knapsack tank from EIAR-recommended rates
+- [x] **Harvest Readiness Advisor** — weather-integrated harvest timing guidance
+- [x] Live admin dashboard — loads real farmer feedback from database (not sample data)
+- [x] Push notifications fully working (VAPID key initialization fixed)
+- [x] Voice diagnosis fixed — correctly calls AI engine
 
 **Next (seeking partnerships to enable):**
 - [ ] Formal field validation studies with farmers (n=50+ per crop)

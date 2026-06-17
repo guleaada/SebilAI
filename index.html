@@ -2899,6 +2899,22 @@ textarea:focus { outline: none; border-color: var(--leaf-mid); }
     <button class="btn-calc" onclick="openYieldModal()">📸 Predict My Yield</button>
   </div>
 
+  <!-- Crop Rotation Advisor -->
+  <div class="val-section">
+    <h3>🔄 Crop Rotation Advisor</h3>
+    <p style="font-size:12px;color:var(--bark);margin-bottom:10px;">Research-based rotation plan to break disease cycles. Based on 42+ Ethiopian research papers from EIAR, Jimma University, and Werabe ARC.</p>
+    <button class="btn-calc" onclick="openRotationModal()">🔄 Get Rotation Plan</button>
+    <div id="rotation-result" style="display:none;margin-top:10px;"></div>
+  </div>
+
+  <!-- Dosage Calculator -->
+  <div class="val-section">
+    <h3>💊 Treatment Dosage Calculator</h3>
+    <p style="font-size:12px;color:var(--bark);margin-bottom:10px;">Enter your farm size and knapsack sprayer volume — get the exact ml or grams to measure out per tank. No guessing.</p>
+    <button class="btn-calc" onclick="openDosageModal()">💊 Calculate Dosage</button>
+    <div id="dosage-result" style="display:none;margin-top:10px;"></div>
+  </div>
+
   <!-- Cooperative Mode -->
   <div class="val-section">
     <h3>👥 Cooperative / Group Mode</h3>
@@ -10539,6 +10555,79 @@ function closeIOSPopup() {
   </div>
 </div>
 
+<!-- ── CROP ROTATION ADVISOR MODAL ───────────────── -->
+<div class="coop-modal-overlay" id="rotation-modal" onclick="if(event.target===this)closeRotationModal()">
+  <div class="coop-box" style="max-width:420px;">
+    <div class="coop-header" style="background:linear-gradient(135deg,#1a5e1a,#2D6A0A);">
+      <h3 style="font-size:16px;font-weight:800;">🔄 Crop Rotation Advisor</h3>
+      <p style="font-size:12px;opacity:0.85;margin-top:3px;">Break disease cycles with research-based rotation plans</p>
+    </div>
+    <div style="padding:16px;">
+      <label style="font-size:12px;font-weight:700;color:#333;display:block;margin-bottom:6px;">Which crop do you want to rotate?</label>
+      <select id="rotation-crop-sel" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;margin-bottom:12px;">
+        <option value="">— Select crop —</option>
+        <option value="enset">Enset (ሰብሊ)</option>
+        <option value="teff">Teff (ጤፍ)</option>
+        <option value="wheat">Wheat (ስንዴ)</option>
+        <option value="maize">Maize (በቆሎ)</option>
+        <option value="coffee">Coffee (ቡና)</option>
+        <option value="potato">Potato (ድንች)</option>
+        <option value="tomato">Tomato (ቲማቲም)</option>
+        <option value="onion">Onion (ሽንኩርት)</option>
+        <option value="barley">Barley (ገብስ)</option>
+        <option value="sorghum">Sorghum (ማሽላ)</option>
+        <option value="noug">Noug / Nigerseed (ኑግ)</option>
+      </select>
+      <button onclick="fetchRotationAdvice()" style="width:100%;background:#2D6A0A;color:white;border:none;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:12px;">🔄 Get Rotation Plan</button>
+      <div id="rotation-modal-result" style="font-size:12px;color:#333;line-height:1.6;"></div>
+    </div>
+    <div style="padding:0 16px 16px;">
+      <button onclick="closeRotationModal()" style="width:100%;background:#f5f5f5;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── DOSAGE CALCULATOR MODAL ────────────────── -->
+<div class="coop-modal-overlay" id="dosage-modal" onclick="if(event.target===this)closeDosageModal()">
+  <div class="coop-box" style="max-width:420px;">
+    <div class="coop-header" style="background:linear-gradient(135deg,#8B4513,#a0522d);">
+      <h3 style="font-size:16px;font-weight:800;">💊 Dosage Calculator</h3>
+      <p style="font-size:12px;opacity:0.85;margin-top:3px;">Exact ml/g per knapsack tank for your farm size</p>
+    </div>
+    <div style="padding:16px;">
+      <label style="font-size:12px;font-weight:700;color:#333;display:block;margin-bottom:4px;">Chemical / Pesticide</label>
+      <select id="dosage-chem-sel" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:8px;font-size:12px;margin-bottom:10px;">
+        <option value="">— Select —</option>
+        <option value="spinosad_tracer">Spinosad (Tracer 480 SC) — Tuta absoluta</option>
+        <option value="mancozeb_dithane">Mancozeb 80WP (Dithane M-45) — Blights / Rust</option>
+        <option value="ridomil_mz">Ridomil MZ 68WP — Late Blight</option>
+        <option value="tebuconazole_natura">Tebuconazole (Natura 250 EW) — Purple Blotch</option>
+        <option value="difenoconazole">Difenoconazole (Diprocon 33 EC) — Purple Blotch</option>
+        <option value="carbendazim">Carbendazim 50WP — Alternaria Leaf Spot</option>
+        <option value="emamectin">Emamectin Benzoate (Proclaim) — Tuta absoluta</option>
+        <option value="neem_extract">Neem Extract (NSKE 5%) — Organic / Thrips</option>
+        <option value="pseudomonas_f">Pseudomonas fluorescens — Early Blight (bio)</option>
+        <option value="trichoderma">Trichoderma — Fusarium / Root Rot (bio)</option>
+      </select>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <div style="flex:1;">
+          <label style="font-size:11px;font-weight:700;color:#555;display:block;margin-bottom:4px;">Farm size (hectares)</label>
+          <input id="dosage-ha" type="number" value="0.5" min="0.01" max="50" step="0.1" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+        </div>
+        <div style="flex:1;">
+          <label style="font-size:11px;font-weight:700;color:#555;display:block;margin-bottom:4px;">Sprayer size (litres)</label>
+          <input id="dosage-sprayer" type="number" value="15" min="5" max="100" step="1" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+        </div>
+      </div>
+      <button onclick="fetchDosageCalc()" style="width:100%;background:#8B4513;color:white;border:none;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:12px;">💊 Calculate Dosage</button>
+      <div id="dosage-modal-result" style="font-size:12px;color:#333;line-height:1.6;"></div>
+    </div>
+    <div style="padding:0 16px 16px;">
+      <button onclick="closeDosageModal()" style="width:100%;background:#f5f5f5;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── COOPERATIVE MODE MODAL ────────────────────── -->
 <div class="coop-modal-overlay" id="coop-modal" onclick="if(event.target===this)closeCoopModal()">
   <div class="coop-box">
@@ -10910,7 +10999,7 @@ function hideValidation() {
 function calculateImpact(crop, farmSizeHa) {
   const lossRates  = {enset:0.45,teff:0.35,noug:0.35,wheat:0.40,maize:0.50,tomato:0.60,onion:0.45,coffee:0.48,potato:0.55,barley:0.38,sorghum:0.42};
   const yieldPerHa = {enset:8,teff:1.8,noug:1.0,wheat:3.2,maize:4.5,tomato:25,onion:18,coffee:0.9,potato:12,barley:2.4,sorghum:2.2};
-  const priceETB   = {enset:1900,teff:5200,noug:5800,wheat:4600,maize:3500,tomato:2000,onion:3200,coffee:11200,potato:2200,tomato:2000,onion:3200,barley:3800,sorghum:2800};
+  const priceETB   = {enset:1900,teff:5200,noug:5800,wheat:4600,maize:3500,tomato:2000,onion:3200,coffee:11200,potato:2200,barley:3800,sorghum:2800};
   const etbSaved = Math.round((lossRates[crop]||0.40)*0.65*(yieldPerHa[crop]||3)*farmSizeHa*(priceETB[crop]||3000));
   return { etbSaved, message: 'Early detection could save you ≈ ' + etbSaved.toLocaleString() + ' ETB this season' };
 }
@@ -11205,17 +11294,31 @@ async function startVoiceListen() {
 async function runVoiceDiagnosis(transcript) {
   try {
     // Parse crop from transcript
-    const CROPS = ['enset','teff','wheat','maize','corn','coffee','potato','barley','sorghum'];
+    const CROPS = ['enset','teff','wheat','maize','corn','coffee','potato','barley','sorghum','tomato','onion','noug'];
     const detected = CROPS.find(c => transcript.toLowerCase().includes(c));
-    const crop = detected || window._lastSelectedCrop || 'teff';
+    const crop = detected || window._lastSelectedCrop || currentCrop || 'teff';
+
+    // Build the `parts` array that /api/analyze expects
+    const promptText = `You are SebilAI, an AI crop disease expert for Ethiopian farmers.
+A farmer described their problem via voice: "${transcript}"
+CROP: ${crop}
+Language: ${currentLang || 'en'}
+This is a VOICE DIAGNOSIS request. Give a concise, farmer-friendly response.
+Respond in JSON format:
+{
+  "disease_name": "name",
+  "confidence": 80,
+  "severity": "High|Medium|Low",
+  "symptoms_matched": ["symptom1"],
+  "treatment_steps": ["step1", "step2"],
+  "prevention": ["tip1"],
+  "diagnosis": "brief explanation"
+}`;
 
     const r = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        crop, symptoms: transcript, lang: currentLang || 'en',
-        voiceMode: true, inputText: transcript
-      })
+      body: JSON.stringify({ parts: [{ text: promptText }] })
     });
     const d = await r.json();
     const diagText = d.disease_name || d.diagnosis || 'Analysis complete';
@@ -11282,6 +11385,78 @@ async function runYieldPredict() {
   } catch(e) {
     document.getElementById('yield-num').textContent = 'Error';
     document.getElementById('yield-sub').textContent = 'Could not get prediction — try again';
+  }
+}
+
+// ==================== CROP ROTATION ADVISOR ====================
+function openRotationModal() {
+  const sel = document.getElementById('rotation-crop-sel');
+  if (sel && currentCrop) sel.value = currentCrop;
+  document.getElementById('rotation-modal').classList.add('show');
+}
+function closeRotationModal() { document.getElementById('rotation-modal').classList.remove('show'); }
+
+async function fetchRotationAdvice() {
+  const crop = document.getElementById('rotation-crop-sel').value;
+  if (!crop) { alert('Please select a crop first'); return; }
+  const el = document.getElementById('rotation-modal-result');
+  el.innerHTML = '<div style="text-align:center;padding:16px;color:#2D6A0A;">🔄 Loading rotation plan...</div>';
+  try {
+    const r = await fetch('/api/rotation-advice?crop=' + encodeURIComponent(crop));
+    const d = await r.json();
+    if (!r.ok) { el.innerHTML = '<div style="color:#B83010;">Error: ' + (d.error||'Unknown') + '</div>'; return; }
+    el.innerHTML = `
+      <div style="background:#f0f7ec;border-radius:8px;padding:12px;border-left:3px solid #2D6A0A;">
+        <strong style="color:#2D6A0A;font-size:13px;">✅ Rotate ${d.crop} with:</strong>
+        <div style="margin-top:4px;">${d.rotateWith.map(c=>'<span style="background:#2D6A0A;color:white;border-radius:4px;padding:2px 6px;font-size:11px;margin:2px;display:inline-block;">'+c+'</span>').join('')}</div>
+        <div style="margin-top:8px;font-size:11px;color:#B83010;"><strong>❌ Avoid after:</strong> ${d.avoidAfter.join(', ')}</div>
+        <div style="margin-top:6px;font-size:11px;"><strong>Minimum break:</strong> ${d.minimumRotationYears} year(s)</div>
+        <div style="margin-top:6px;font-size:11px;color:#555;">${d.nextSeasonAdvice}</div>
+        <div style="margin-top:6px;font-size:10px;color:#888;border-top:1px solid #ddd;padding-top:6px;">📚 Source: ${d.researchSource}</div>
+      </div>
+      <div style="margin-top:8px;">
+        ${d.actionSteps.map((s,i)=>'<div style="display:flex;gap:6px;margin-bottom:5px;font-size:11px;"><span style="color:#2D6A0A;font-weight:700;">'+(i+1)+'.</span><span>'+s+'</span></div>').join('')}
+      </div>`;
+  } catch(e) {
+    el.innerHTML = '<div style="color:#B83010;">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+// ==================== DOSAGE CALCULATOR ====================
+function openDosageModal() {
+  document.getElementById('dosage-modal').classList.add('show');
+}
+function closeDosageModal() { document.getElementById('dosage-modal').classList.remove('show'); }
+
+async function fetchDosageCalc() {
+  const chem = document.getElementById('dosage-chem-sel').value;
+  const ha = document.getElementById('dosage-ha').value;
+  const sprayer = document.getElementById('dosage-sprayer').value;
+  if (!chem) { alert('Please select a chemical'); return; }
+  const el = document.getElementById('dosage-modal-result');
+  el.innerHTML = '<div style="text-align:center;padding:16px;color:#8B4513;">💊 Calculating...</div>';
+  try {
+    const url = '/api/dosage-calc?chemical=' + encodeURIComponent(chem) + '&farmHa=' + encodeURIComponent(ha) + '&sprayerLitres=' + encodeURIComponent(sprayer);
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!r.ok) { el.innerHTML = '<div style="color:#B83010;">Error: ' + (d.error||'Unknown') + '</div>'; return; }
+    const isBio = d.chemical.toLowerCase().includes('bio') || d.chemical.toLowerCase().includes('neem') || d.chemical.toLowerCase().includes('pseudo') || d.chemical.toLowerCase().includes('tricho');
+    const safeColor = isBio ? '#2D6A0A' : '#B83010';
+    el.innerHTML = `
+      <div style="background:#fff8ec;border-radius:8px;padding:12px;border-left:3px solid #8B4513;">
+        <strong style="color:#8B4513;font-size:13px;">${d.chemical}</strong>
+        <div style="font-size:11px;color:#555;margin-top:3px;">Target: ${d.targetPest}</div>
+        <div style="margin-top:10px;background:#2D6A0A;color:white;border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:11px;opacity:0.85;">Per ${d.sprayerSize}</div>
+          <div style="font-size:22px;font-weight:900;margin:4px 0;">${d.amountPerTank}</div>
+          <div style="font-size:11px;opacity:0.85;">${d.tanksNeeded} tank(s) total for ${d.farmSize}</div>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:#333;">${d.applicationNote}</div>
+        <div style="margin-top:8px;font-size:11px;color:${safeColor};background:${isBio?'#f0f7ec':'#fff0f0'};border-radius:6px;padding:8px;">${d.safetyNote}</div>
+        <div style="margin-top:6px;font-size:10px;color:#888;">📚 ${d.researchSource}</div>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = '<div style="color:#B83010;">Failed to calculate: ' + e.message + '</div>';
   }
 }
 

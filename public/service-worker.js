@@ -1,7 +1,7 @@
 // ================================================================
-// RESILIENCE GUARDIAN — Service Worker v4 + Push Notifications
+// SEBILAI — Service Worker v5 + Push Notifications
 // ================================================================
-const CACHE_NAME = 'rg-v4';
+const CACHE_NAME = 'sebilai-v5';
 const PUSH_ICON  = '/icons/icon-192.png';
 
 // ── INSTALL ──────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ self.addEventListener('push', e => {
     icon:    icon,
     badge:   badge,
     vibrate: vibrate,
-    tag:     'rg-disease-alert',
+    tag:     'sebilai-disease-alert',
     renotify: true,
     data: { url: '/', crop: data.crop, severity: data.severity },
     actions: [

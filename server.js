@@ -1,7 +1,8 @@
 require('dotenv').config();
-const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
+const express  = require('express');
+const cors     = require('cors');
+const path     = require('path');
+const webpush  = require('web-push');
 
 const app  = express();
 const fs   = require('fs');
@@ -9,6 +10,17 @@ const fs   = require('fs');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { z } = require('zod');
+
+// ── WEB PUSH (VAPID) SETUP ────────────────────────────────
+// Only activate if both VAPID keys are present in environment.
+const VAPID_PUBLIC  = process.env.VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY;
+if (VAPID_PUBLIC && VAPID_PRIVATE) {
+  webpush.setVapidDetails('mailto:gulilatkasiye4@gmail.com', VAPID_PUBLIC, VAPID_PRIVATE);
+  console.log('🔔 Web Push: VAPID keys configured');
+} else {
+  console.warn('⚠️  VAPID keys not set — push notifications disabled');
+}
 const JWT_SECRET = process.env.JWT_SECRET || 'sebilai-dev-secret-CHANGE-IN-PROD';
 if (JWT_SECRET === 'sebilai-dev-secret-CHANGE-IN-PROD') {
   console.warn('⚠️  WARNING: Using default JWT_SECRET. Set JWT_SECRET env var in production!');
@@ -20,6 +32,51 @@ if (JWT_SECRET === 'sebilai-dev-secret-CHANGE-IN-PROD') {
 // multiple connections to the same file fine, especially with WAL mode.
 const sqlite3 = require('sqlite3').verbose();
 const dbAsync = new sqlite3.Database(path.join(__dirname, 'sebilai.db'));
+
+// Auto-initialize v2 tables (users, crops, diseases, diagnoses, stats_cache)
+// so `node init_db.js` is not required as a manual step before first run.
+dbAsync.serialize(() => {
+  dbAsync.run("PRAGMA foreign_keys = ON;");
+  dbAsync.run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT CHECK(role IN ('admin', 'agronomist')) DEFAULT 'agronomist',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  dbAsync.run(`CREATE TABLE IF NOT EXISTS crops (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    local_names TEXT, scientific_name TEXT, category TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  dbAsync.run(`CREATE TABLE IF NOT EXISTS diseases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    crop_id INTEGER, name TEXT NOT NULL, type TEXT CHECK(type IN ('Disease', 'Pest')),
+    pathogen TEXT, symptoms TEXT, severity TEXT,
+    management_cultural TEXT, management_biological TEXT, management_chemical TEXT,
+    source TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (crop_id) REFERENCES crops(id)
+  )`);
+  dbAsync.run(`CREATE TABLE IF NOT EXISTS diagnoses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    farmer_id TEXT DEFAULT 'anonymous',
+    crop_id INTEGER NOT NULL, disease_id INTEGER, disease_name TEXT,
+    severity TEXT, confidence REAL, photo_url TEXT,
+    latitude REAL, longitude REAL, region TEXT, notes TEXT,
+    impact_etb INTEGER DEFAULT 0, status TEXT DEFAULT 'new',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (crop_id) REFERENCES crops(id)
+  )`);
+  dbAsync.run(`CREATE TABLE IF NOT EXISTS stats_cache (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    total_diagnoses INTEGER DEFAULT 0,
+    total_impact_etb INTEGER DEFAULT 0,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  dbAsync.run(`INSERT OR IGNORE INTO stats_cache (id) VALUES (1)`);
+  console.log('✅ v2 DB tables initialized');
+});
 
 // ── SQLITE PERSISTENCE ────────────────────────────────────
 // Replaces flat JSON files in /tmp — survives restarts and deploys.
@@ -427,12 +484,15 @@ app.get('/api/satellite-risk', async (req, res) => {
 });
 
 // ── DRONE IMAGE ANALYSIS ──────────────────────────────────
+// Accepts multipart-like approach: query params for metadata, raw body as image bytes.
+// Usage: POST /api/drone-upload?crop=tomato&lat=8.5&lon=39.2 with image as raw body.
 app.post('/api/drone-upload', express.raw({type: '*/*', limit: '20mb'}), async (req, res) => {
-  req.file = { originalname: 'drone_image', size: req.body?.length || 0 };
-  if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
-  const crop = req.body.crop || 'enset';
-  const lat  = parseFloat(req.body.lat || 0);
-  const lon  = parseFloat(req.body.lon || 0);
+  const imageBuffer = req.body;
+  if (!imageBuffer || imageBuffer.length < 100) return res.status(400).json({ error: 'No image uploaded' });
+  // Metadata comes from query params (since body is raw image bytes)
+  const crop = req.query.crop || 'enset';
+  const lat  = parseFloat(req.query.lat || 9.0);
+  const lon  = parseFloat(req.query.lon || 40.0);
 
   console.log(`🚁 Drone image received: ${req.file.originalname} | crop: ${crop}`);
 
@@ -444,8 +504,8 @@ app.post('/api/drone-upload', express.raw({type: '*/*', limit: '20mb'}), async (
   // Use AI to analyze drone image
   let analysis = { diagnosis: 'Analyzing aerial view...', confidence: 0, severity: 'Unknown', recommendation: 'Upload a ground-level photo to main diagnosis for detailed analysis.' };
   try {
-    if (req.body && Buffer.isBuffer(req.body) && req.body.length > 1000 && GROQ_KEY) {
-      const b64 = req.body.toString('base64');
+    if (imageBuffer && Buffer.isBuffer(imageBuffer) && imageBuffer.length > 1000 && GROQ_KEY) {
+      const b64 = imageBuffer.toString('base64');
       const droneRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEY },
@@ -628,8 +688,21 @@ async function tryGemini(parts, satContext) {
 }
 
 
+// ── SHARED RATE LIMITER (for SMS, TTS, translate) ────────
+function checkRateLimit(req, res, perMinute = 10) {
+  const ip = req.ip || 'unknown';
+  const count = (reqCounts.get(ip) || 0) + 1;
+  reqCounts.set(ip, count);
+  if (count > perMinute) {
+    res.status(429).json({ error: 'Too many requests. Please wait 1 minute.' });
+    return false;
+  }
+  return true;
+}
+
 // ── SMS NOTIFICATION (Africa's Talking) ─────────────────
 app.post('/api/send-sms', async (req, res) => {
+  if (!checkRateLimit(req, res, 5)) return;
   const { phone, crop, disease, severity, action } = req.body;
   if (!phone || !disease) return res.status(400).json({ error: 'Missing fields' });
 
@@ -665,6 +738,7 @@ app.post('/api/send-sms', async (req, res) => {
 
 // ── SERVER TTS (Google Translate TTS — supports Amharic, Oromiffa, Tigrinya) ──
 app.post('/api/tts', async (req, res) => {
+  if (!checkRateLimit(req, res, 15)) return;
   const { text, lang } = req.body;
   if (!text) return res.status(400).json({ error: 'No text' });
 
@@ -729,8 +803,8 @@ const PUSH_MESSAGES = {
 
 // Send push to a single subscription
 async function sendPushNotification(subscription, payload) {
-  if (!webpush) {
-    console.log('⚠️  web-push not available — skipping push');
+  if (!VAPID_PUBLIC || !VAPID_PRIVATE) {
+    console.log('⚠️  VAPID keys not set — skipping push');
     return false;
   }
   try {
@@ -772,11 +846,12 @@ app.post('/api/push-unsubscribe', (req, res) => {
 // Update subscription (when profile region/crop changes)
 app.post('/api/push-update', (req, res) => {
   const { region, crop, lang } = req.body;
-  // Update all matching subscriptions (simple version)
   pushSubscriptions.forEach((sub, key) => {
     if (region) sub.region = region;
     if (crop)   sub.crop   = crop;
     if (lang)   sub.lang   = lang;
+    // Persist the updated subscription back to SQLite
+    stmts.upsertPush.run(key, JSON.stringify(sub.subscription), sub.lang, sub.region, sub.crop, new Date().toISOString());
   });
   res.json({ ok: true });
 });
@@ -937,6 +1012,7 @@ async function sendSMSAlert(phone, message) {
 // ── GOOGLE TRANSLATE PROXY ────────────────────────────────
 // Free unofficial endpoint — no API key needed
 app.post('/api/translate', async (req, res) => {
+  if (!checkRateLimit(req, res, 20)) return;
   const { text, target, source = 'en' } = req.body;
   if (!text || !target) return res.status(400).json({ error: 'text and target required' });
   
@@ -1016,7 +1092,7 @@ app.post('/api/sync-feedback', (req, res) => {
 
 app.get('/api/health', (req, res) => {
   res.json({
-    status: 'ok', version: '3.1',
+    status: 'ok', version: '3.2.0',
     timestamp: new Date().toISOString(),
     groq:       GROQ_KEY       ? '✅' : '❌',
     openrouter: OPENROUTER_KEY ? '✅' : '❌',
@@ -1229,11 +1305,11 @@ function checkOutbreakAndAlert(newReport) {
     if (AT_KEY && smsSubscribers.size > 0) {
       const msg = `🚨 SebilAI ALERT: ${recentInZone.length}+ cases of ${newReport.disease} on ${newReport.crop} detected in your region in the last 7 days. Inspect your crop immediately. Info: sebilai.com`;
       // Send to all SMS subscribers (in production, filter by region)
-      smsSubscribers.forEach(phone => {
+      smsSubscribers.forEach((sub) => {
         fetch('https://api.africastalking.com/version1/messaging', {
           method: 'POST',
           headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded', 'apikey': AT_KEY },
-          body: new URLSearchParams({ username: AT_USER, to: phone, message: msg })
+          body: new URLSearchParams({ username: AT_USER, to: sub.phone, message: msg })
         }).catch(e => console.error('Outbreak SMS error:', e.message));
       });
     }
@@ -1411,11 +1487,14 @@ app.post('/api/yield-actual', (req, res) => {
   const record = yieldRecords.find(r => r.id === parseInt(id));
   if (!record) return res.status(404).json({ error: 'Record not found' });
   record.actualYield = parseFloat(actualYield);
+  if (parseFloat(actualYield) <= 0) {
+    return res.status(400).json({ error: 'actualYield must be greater than 0' });
+  }
   record.accuracy = record.predictedYield > 0
     ? Math.round(100 - Math.abs(record.predictedYield - record.actualYield) / record.actualYield * 100)
     : null;
   saveJSON('yield_records.json', yieldRecords);
-  console.log(`📊 Yield actual: ${crop} predicted=${record.predictedYield} actual=${actualYield} accuracy=${record.accuracy}%`);
+  console.log(`📊 Yield actual: ${record.crop} predicted=${record.predictedYield} actual=${actualYield} accuracy=${record.accuracy}%`);
   res.json({ ok: true, accuracy: record.accuracy });
 });
 
@@ -1752,10 +1831,286 @@ app.get('/api/v2/outbreaks/map', (req, res) => {
   });
 });
 
+// ══════════════════════════════════════════════════════════
+// CROP ROTATION ADVISOR
+// Research-based rotation recommendations for Ethiopian crops
+// Helps break disease cycles — critical for soil health.
+// ══════════════════════════════════════════════════════════
+const ROTATION_GUIDE = {
+  enset: {
+    rotateWith: ['maize', 'teff', 'haricot bean', 'soybean'],
+    avoidAfter: ['enset', 'banana'],
+    rotationYears: 3,
+    rationale: 'Enset Bacterial Wilt (Xanthomonas) survives in soil 2–3 years. Rotate with cereals and legumes to reduce inoculum.',
+    nextSeasonAdvice: 'Plant teff or maize on Enset plots after bacterial wilt — both are non-hosts for Xanthomonas campestris pv. musacearum.',
+    legumeBenefit: 'Haricot bean or soybean after Enset adds 40–60 kg N/ha, improving soil fertility for next Enset cycle.',
+    source: 'Werabe ARC community rouging studies; SARI Enset disease management guidelines'
+  },
+  tomato: {
+    rotateWith: ['teff', 'maize', 'barley', 'haricot bean', 'onion'],
+    avoidAfter: ['tomato', 'potato', 'pepper', 'eggplant'],
+    rotationYears: 3,
+    rationale: 'Tuta absoluta pupae overwinter in soil. Fusarium, Bacterial Wilt (Ralstonia), and Late Blight (P. infestans) all persist in Solanaceae debris.',
+    nextSeasonAdvice: 'Follow tomato with teff or maize. Minimum 3-year break from all Solanaceae (tomato, potato, eggplant, pepper).',
+    legumeBenefit: 'Haricot bean between Solanaceae cycles improves soil nitrogen and suppresses Fusarium populations.',
+    source: 'EIAR Melkassa 2024 Technical Manual; Jabamo et al. 2023 IPM trials'
+  },
+  potato: {
+    rotateWith: ['teff', 'wheat', 'barley', 'haricot bean'],
+    avoidAfter: ['potato', 'tomato', 'pepper', 'eggplant'],
+    rotationYears: 3,
+    rationale: 'Bacterial Wilt (Ralstonia solanacearum) can persist 5+ years in soil. Late blight sporangia survive in infected tubers and plant debris.',
+    nextSeasonAdvice: 'Plant teff, wheat, or haricot bean for 3 seasons before returning to potato. Always use certified seed.',
+    legumeBenefit: 'Haricot bean or soybean before potato reduces nematode populations and adds soil nitrogen.',
+    source: 'EIAR potato disease management; CIP (International Potato Center) Ethiopia program'
+  },
+  onion: {
+    rotateWith: ['teff', 'maize', 'wheat', 'haricot bean'],
+    avoidAfter: ['onion', 'garlic', 'leek', 'shallot'],
+    rotationYears: 4,
+    rationale: 'Sclerotium cepivorum (White Rot) forms sclerotia surviving 15–20 years in soil. Purple Blotch spores overwinter on debris.',
+    nextSeasonAdvice: 'After onion, plant teff or maize for minimum 4 years before returning to Allium crops.',
+    legumeBenefit: 'Soybean suppresses Sclerotium populations through biological activity in roots.',
+    source: 'Genet & Yalew 2022 Fogera Plains; Bahir Dar University onion research; EIAR Allium management'
+  },
+  wheat: {
+    rotateWith: ['teff', 'haricot bean', 'maize', 'soybean', 'noug'],
+    avoidAfter: ['wheat', 'barley', 'teff'],
+    rotationYears: 2,
+    rationale: 'Stripe Rust (Yr) and Stem Rust (Sr) urediniospores spread by wind but volunteer wheat and grass hosts maintain inoculum. Septoria blotch survives on debris.',
+    nextSeasonAdvice: 'Rotate wheat with haricot bean or maize every 2 years. Avoid wheat-after-wheat or wheat-after-barley on same plot.',
+    legumeBenefit: 'Haricot bean fixes 80–120 kg N/ha, reducing fertilizer need for subsequent wheat by 30–40%.',
+    source: 'CIMMYT Ethiopia rust management; EIAR wheat agronomy recommendations'
+  },
+  maize: {
+    rotateWith: ['teff', 'soybean', 'haricot bean', 'wheat'],
+    avoidAfter: ['maize', 'sorghum'],
+    rotationYears: 2,
+    rationale: 'Fall Armyworm (Spodoptera frugiperda) pupae overwinter in soil. Maize Lethal Necrosis and Gray Leaf Spot residues persist on debris.',
+    nextSeasonAdvice: 'Follow maize with soybean or haricot bean. Avoid maize after sorghum (shared pests).',
+    legumeBenefit: 'Soybean after maize adds 60–100 kg N/ha and disrupts armyworm lifecycle.',
+    source: 'CIMMYT East Africa FAW management; EIAR maize disease research'
+  },
+  teff: {
+    rotateWith: ['haricot bean', 'soybean', 'maize', 'noug'],
+    avoidAfter: ['teff', 'wheat', 'barley'],
+    rotationYears: 2,
+    rationale: 'Blast (Magnaporthe oryzae) and Head Blight spores persist on grass debris. Monoculture teff depletes zinc and sulfur.',
+    nextSeasonAdvice: 'Alternate teff with haricot bean or maize every 2 seasons. Avoid teff after wheat or barley on same plot.',
+    legumeBenefit: 'Haricot bean before teff adds nitrogen and improves teff protein content and grain quality.',
+    source: 'EIAR Debre Zeit Teff Research Program; Ethiopian Soil Information System'
+  },
+  coffee: {
+    rotateWith: ['enset', 'maize', 'taro'],
+    avoidAfter: ['coffee'],
+    rotationYears: 5,
+    rationale: 'Coffee Wilt (Gibberella xylarioides) builds up in continuously cropped coffee soil. CBD (Colletotrichum kahawae) spores persist on bark and mummified berries.',
+    nextSeasonAdvice: 'After removing diseased coffee, rest plots 5+ years under maize or Enset shade crops before replanting. Remove all mummified berries.',
+    legumeBenefit: 'Shade trees (Albizia, Erythrina) used in coffee gardens fix nitrogen and reduce soil temperature, reducing CBD pressure.',
+    source: 'Jimma University Coffee Research; EIAR Jimma CBD management guide; Hawassa University'
+  },
+  barley: {
+    rotateWith: ['haricot bean', 'soybean', 'potato', 'noug'],
+    avoidAfter: ['barley', 'wheat', 'teff'],
+    rotationYears: 2,
+    rationale: 'Scald (Rhynchosporium secalis), Net Blotch and Loose Smut (Ustilago nuda) persist on crop debris and infected seed.',
+    nextSeasonAdvice: 'Rotate barley with haricot bean or potato every 2 years. Use certified disease-free seed whenever possible.',
+    legumeBenefit: 'Haricot bean before barley adds nitrogen and reduces soil-borne pathogen populations.',
+    source: 'EIAR Holetta barley research; WUR Ethiopia highland crop rotation studies'
+  },
+  sorghum: {
+    rotateWith: ['haricot bean', 'teff', 'noug', 'sunflower'],
+    avoidAfter: ['sorghum', 'maize'],
+    rotationYears: 3,
+    rationale: 'Striga (witch-weed) seeds persist in soil 20+ years. Head Smut (Sporisorium sorghi) sclerotia survive multiple seasons. Stalk Rot builds up under monoculture.',
+    nextSeasonAdvice: 'Striga-infested plots must rest 3+ years under haricot bean or teff (non-hosts). Use Striga-resistant varieties (SRN-39, ICSV 111).',
+    legumeBenefit: 'Haricot bean is a trap crop for Striga — it stimulates germination but is NOT a host, so Striga seedlings die. Plant haricot bean before sorghum to deplete Striga seed bank.',
+    source: 'EIAR Melkassa sorghum program; ICRISAT Striga management East Africa'
+  },
+  noug: {
+    rotateWith: ['teff', 'haricot bean', 'maize', 'wheat'],
+    avoidAfter: ['noug', 'sunflower'],
+    rotationYears: 3,
+    rationale: 'Alternaria and Cercospora persist on crop debris. Sclerotinia survives as sclerotia in soil 3+ years. Monoculture Noug depletes soil sulfur.',
+    nextSeasonAdvice: 'Rotate Noug with teff or haricot bean every 3 years. Avoid Noug after sunflower (shared Sclerotinia host).',
+    legumeBenefit: 'Haricot bean improves soil sulfur availability for subsequent Noug oil quality.',
+    source: 'Holetta ARC Noug agronomy studies; Dagnachew Yirgou 1964; EIAR Oilseed Strategy 2016-2023'
+  }
+};
+
+app.get('/api/rotation-advice', (req, res) => {
+  const { crop, disease, season } = req.query;
+  if (!crop) return res.status(400).json({ error: 'crop parameter required' });
+  const guide = ROTATION_GUIDE[crop.toLowerCase()];
+  if (!guide) return res.status(404).json({ error: `No rotation data for crop: ${crop}` });
+
+  const currentMonth = new Date().getMonth() + 1;
+  const cal = SEASONAL_CALENDAR[crop.toLowerCase()];
+  const isHarvestSoon = cal && cal.harvestMonths.some(m => Math.abs(m - currentMonth) <= 2);
+
+  res.json({
+    crop,
+    disease: disease || null,
+    rotateWith: guide.rotateWith,
+    avoidAfter: guide.avoidAfter,
+    minimumRotationYears: guide.rotationYears,
+    rationale: guide.rationale,
+    nextSeasonAdvice: guide.nextSeasonAdvice,
+    legumeBenefit: guide.legumeBenefit,
+    timingNote: isHarvestSoon
+      ? `Your ${crop} harvest season is approaching — start planning rotation now for next season.`
+      : `Next rotation planning season for ${crop}: after harvest in ${cal ? 'months ' + cal.harvestMonths.join(', ') : 'coming months'}.`,
+    researchSource: guide.source,
+    actionSteps: [
+      `Do NOT plant ${crop} on the same plot for ${guide.rotationYears} years after disease or harvest.`,
+      `Best next crop: ${guide.rotateWith[0]} (break disease cycle) or ${guide.rotateWith[1]} (nitrogen benefit).`,
+      guide.legumeBenefit,
+      'Remove and burn all crop residues — do not compost infected material.',
+      'Record this plot location and keep a 3-year crop diary.'
+    ]
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// CHEMICAL DOSAGE CALCULATOR
+// Converts EIAR/research chemical rates to practical farm measurements.
+// Helps farmers who have knapsack sprayers calculate exact amounts.
+// ══════════════════════════════════════════════════════════
+const CHEMICAL_RATES = {
+  // Pesticide/Fungicide: rate per ha, common Ethiopian formulations
+  'spinosad_tracer':      { label: 'Spinosad (Tracer 480 SC)', ratePerHa: 150, unit: 'ml', crop: 'tomato', targetPest: 'Tuta absoluta', source: 'EIAR Melkassa 2024; Jabamo et al. 2023' },
+  'mancozeb_dithane':     { label: 'Mancozeb 80WP (Dithane M-45)', ratePerHa: 2000, unit: 'g', crop: 'multiple', targetPest: 'Late Blight, Early Blight, Purple Blotch', source: 'Standard Ethiopian fungicide label; EIAR guidelines' },
+  'ridomil_mz':           { label: 'Ridomil MZ 68WP (Metalaxyl+Mancozeb)', ratePerHa: 2000, unit: 'g', crop: 'tomato/potato', targetPest: 'Late Blight (P. infestans)', source: 'EIAR potato/tomato management' },
+  'tebuconazole_natura':  { label: 'Tebuconazole (Natura 250 EW)', ratePerHa: 750, unit: 'ml', crop: 'onion', targetPest: 'Purple Blotch', source: 'Genet & Yalew 2022 Fogera Plains' },
+  'difenoconazole':       { label: 'Difenoconazole (Diprocon 33 EC)', ratePerHa: 500, unit: 'ml', crop: 'onion', targetPest: 'Purple Blotch', source: 'Genet & Yalew 2022 Fogera Plains' },
+  'carbendazim':          { label: 'Carbendazim 50WP', ratePerHa: 500, unit: 'g', crop: 'noug/teff', targetPest: 'Alternaria Leaf Spot', source: 'Gupta KN 2017; EIAR Noug studies' },
+  'emamectin':            { label: 'Emamectin Benzoate (Proclaim 5 SG)', ratePerHa: 200, unit: 'g', crop: 'tomato', targetPest: 'Tuta absoluta', source: 'EIAR Melkassa 2024 alternative' },
+  'chlorpyrifos':         { label: 'Chlorpyrifos 48 EC', ratePerHa: 1500, unit: 'ml', crop: 'multiple', targetPest: 'Cutworms, Armyworm', source: 'Ethiopia pesticide regulatory label' },
+  'neem_extract':         { label: 'Neem Seed Kernel Extract (NSKE 5%)', ratePerHa: 25000, unit: 'ml', crop: 'multiple', targetPest: 'Thrips, Aphids, Whitefly', source: 'Organic approved — EIAR biocontrol guide' },
+  'pseudomonas_f':        { label: 'Pseudomonas fluorescens (biocontrol)', ratePerHa: 5000, unit: 'ml', crop: 'tomato', targetPest: 'Early Blight (Alternaria)', source: 'Berihun et al. 2026 Woldia University' },
+  'trichoderma':          { label: 'Trichoderma asperellum (biocontrol)', ratePerHa: 5000, unit: 'g', crop: 'multiple', targetPest: 'Fusarium, Root Rot', source: 'EIAR biocontrol recommendations' },
+};
+
+app.get('/api/dosage-calc', (req, res) => {
+  const { chemical, farmHa, sprayerLitres } = req.query;
+  if (!chemical || !farmHa) return res.status(400).json({ error: 'chemical and farmHa required. See /api/dosage-calc/chemicals for available options.' });
+
+  const chem = CHEMICAL_RATES[chemical.toLowerCase()];
+  if (!chem) {
+    return res.status(404).json({
+      error: `Chemical '${chemical}' not found.`,
+      availableChemicals: Object.keys(CHEMICAL_RATES),
+      tip: 'Use the chemical key (e.g., spinosad_tracer, mancozeb_dithane)'
+    });
+  }
+
+  const ha = parseFloat(farmHa);
+  if (isNaN(ha) || ha <= 0 || ha > 100) return res.status(400).json({ error: 'farmHa must be a number between 0.01 and 100' });
+
+  const sprayer = parseFloat(sprayerLitres) || 15; // Ethiopian default: 15L knapsack
+  const totalAmount = chem.ratePerHa * ha;
+
+  // Water volume: typical application rate 200-400L/ha for knapsack
+  const waterPerHa = 200;
+  const totalWaterLitres = waterPerHa * ha;
+  const tanksNeeded = Math.ceil(totalWaterLitres / sprayer);
+  const amountPerTank = parseFloat((totalAmount / tanksNeeded).toFixed(1));
+
+  // Safe handling reminder
+  const safetyNote = chem.label.includes('biocontrol') || chem.label.includes('Neem')
+    ? 'Organic/bio product — wear gloves, avoid eye contact.'
+    : '⚠️ CHEMICAL PESTICIDE: Wear PPE (gloves, mask, goggles). Do not spray in wind. Observe pre-harvest interval (PHI) on label. Store locked away from children.';
+
+  res.json({
+    chemical: chem.label,
+    targetPest: chem.targetPest,
+    recommendedCrop: chem.crop,
+    farmSize: `${ha} hectare(s)`,
+    sprayerSize: `${sprayer} litre knapsack`,
+    totalAmountNeeded: `${totalAmount} ${chem.unit}`,
+    totalWaterNeeded: `${totalWaterLitres} litres`,
+    tanksNeeded,
+    amountPerTank: `${amountPerTank} ${chem.unit} per ${sprayer}L tank`,
+    applicationNote: `Mix ${amountPerTank} ${chem.unit} of ${chem.label} in each full ${sprayer}L tank. Apply ${tanksNeeded} tank(s) total for your ${ha} ha farm.`,
+    safetyNote,
+    researchSource: chem.source,
+    disclaimer: 'Always verify chemical availability and label rates locally. Consult your nearest extension worker for confirmation.'
+  });
+});
+
+app.get('/api/dosage-calc/chemicals', (req, res) => {
+  const { crop } = req.query;
+  const chems = Object.entries(CHEMICAL_RATES)
+    .filter(([, v]) => !crop || v.crop === 'multiple' || v.crop.includes(crop.toLowerCase()))
+    .map(([key, v]) => ({ key, label: v.label, targetPest: v.targetPest, crop: v.crop, source: v.source }));
+  res.json({ chemicals: chems, totalCount: chems.length });
+});
+
+// ══════════════════════════════════════════════════════════
+// HARVEST READINESS ADVISOR
+// Combines crop calendar + weather forecast to advise on harvest timing.
+// Unique feature: helps farmers avoid harvesting in disease-risk weather.
+// ══════════════════════════════════════════════════════════
+app.get('/api/harvest-readiness', async (req, res) => {
+  const { crop, lat, lon, plantedDate } = req.query;
+  if (!crop) return res.status(400).json({ error: 'crop required' });
+
+  const cal = SEASONAL_CALENDAR[crop.toLowerCase()];
+  if (!cal) return res.status(404).json({ error: `No calendar data for crop: ${crop}` });
+
+  const currentMonth = new Date().getMonth() + 1;
+  const isHarvestMonth = cal.harvestMonths.includes(currentMonth);
+  const isNearHarvest = cal.harvestMonths.some(m => Math.abs(m - currentMonth) <= 1);
+
+  let weatherWarning = null;
+  let forecastSummary = null;
+
+  if (lat && lon) {
+    try {
+      const wRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=precipitation_sum,relative_humidity_2m_max&forecast_days=7&timezone=Africa%2FAddis_Ababa`);
+      const wData = await wRes.json();
+      const rains = wData.daily?.precipitation_sum || [];
+      const humidity = wData.daily?.relative_humidity_2m_max || [];
+      const rainDays = rains.filter(r => r > 5).length;
+      const highHumidityDays = humidity.filter(h => h > 80).length;
+
+      if (rainDays >= 4) weatherWarning = `⚠️ Heavy rain forecast (${rainDays}/7 days) — delay harvest if possible to reduce post-harvest losses and fungal contamination.`;
+      else if (rainDays >= 2) weatherWarning = `🌧️ Some rain expected (${rainDays}/7 days) — harvest in morning dry periods. Dry ${crop} immediately after harvest.`;
+      else weatherWarning = `✅ Good harvest weather forecast — dry conditions next 7 days.`;
+
+      forecastSummary = { rainDays, highHumidityDays, recommendation: rainDays < 2 ? 'Proceed' : rainDays < 4 ? 'Caution' : 'Delay' };
+    } catch(e) {
+      weatherWarning = 'Could not fetch weather forecast — check locally before harvest.';
+    }
+  }
+
+  res.json({
+    crop,
+    currentMonth,
+    isHarvestSeason: isHarvestMonth,
+    isNearHarvestSeason: isNearHarvest,
+    harvestMonths: cal.harvestMonths,
+    plantingMonths: cal.plantingMonths,
+    readinessStatus: isHarvestMonth ? 'HARVEST NOW' : isNearHarvest ? 'APPROACHING HARVEST' : 'NOT YET',
+    weatherWarning,
+    forecastSummary,
+    postHarvestTips: [
+      `Dry ${crop} immediately after harvest to target moisture (prevents fungal storage rots).`,
+      'Use clean, dry storage bags — avoid storing near infected crop residues.',
+      'Inspect stored crop weekly for signs of mold, insects, or rodent damage.',
+      `Remove all crop residues from field after harvest — reduces next season's disease pressure.`
+    ],
+    watchDiseases: cal.diseases,
+    diseaseNote: cal.peakDiseaseMonths.includes(currentMonth)
+      ? `⚠️ This is a peak disease month for ${crop}. Inspect harvested produce carefully before storage.`
+      : `Disease pressure is relatively lower during harvest for ${crop} in this month.`
+  });
+});
+
 app.get('*', (req, res) => res.sendFile((require('fs').existsSync(path.join(__dirname, 'public', 'index.html')) ? path.join(__dirname, 'public', 'index.html') : path.join(__dirname, 'index.html'))));
 
 app.listen(PORT, () => {
-  console.log(`\n🌿 SebilAI v3.0`);
+  console.log(`\n🌿 SebilAI v3.2.0`);
   console.log(`   Groq:       ${GROQ_KEY       ? '✅' : '❌'}`);
   console.log(`   OpenRouter: ${OPENROUTER_KEY ? '✅' : '❌'}`);
   console.log(`   Gemini:     ${GEMINI_KEY     ? '✅' : '❌'}`);

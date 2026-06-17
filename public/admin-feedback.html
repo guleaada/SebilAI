@@ -151,17 +151,28 @@ footer { text-align:center; padding:20px; font-size:11px; color:#aaa; margin-top
 <footer>SebilAI Admin v3.1 · © 2025 Gulilat Kasiye Worku · Password protected · <a href="/" style="color:#2D6A0A;">Back to App</a></footer>
 
 <script>
-const ADMIN_PW = 'SebilAI_Admin_2025!';
+// Admin password is validated server-side via X-Admin-Key header.
+// Client-side password is NOT stored or compared here.
+var _adminKey = null;
 var feedbackData = [];
 
 function checkLogin() {
-  if (document.getElementById('pwInput').value === ADMIN_PW) {
-    document.getElementById('loginOverlay').style.display = 'none';
-    loadAll();
-  } else {
-    document.getElementById('pwInput').style.borderColor = '#B83010';
-    alert('Incorrect password');
-  }
+  var pw = document.getElementById('pwInput').value;
+  if (!pw) { document.getElementById('pwInput').style.borderColor = '#B83010'; return; }
+  // Verify against server — no client-side secret
+  fetch('/api/health', { headers: { 'x-admin-key': pw } })
+    .then(function(r) { return r.status; })
+    .then(function(status) {
+      if (status === 200) {
+        _adminKey = pw;
+        document.getElementById('loginOverlay').style.display = 'none';
+        loadAll();
+      } else {
+        document.getElementById('pwInput').style.borderColor = '#B83010';
+        alert('Incorrect password');
+      }
+    })
+    .catch(function() { alert('Network error — try again'); });
 }
 
 async function loadAll() {
@@ -194,36 +205,45 @@ async function loadHealth() {
 }
 
 function loadFeedback() {
-  var data = [
-    {ts:'2025-05-22 08:30',crop:'enset',disease:'Bacterial Wilt',severity:'high',accuracy:4,region:'SNNPR',lang:'am'},
-    {ts:'2025-05-22 07:15',crop:'teff',disease:'Leaf Rust',severity:'medium',accuracy:5,region:'Tigray',lang:'ti'},
-    {ts:'2025-05-22 06:45',crop:'wheat',disease:'Stripe Rust',severity:'high',accuracy:4,region:'Amhara',lang:'en'},
-    {ts:'2025-05-21 17:20',crop:'maize',disease:'Fall Armyworm',severity:'high',accuracy:5,region:'Oromia',lang:'om'},
-    {ts:'2025-05-21 15:00',crop:'coffee',disease:'Berry Disease',severity:'medium',accuracy:3,region:'Kaffa Zone',lang:'am'},
-    {ts:'2025-05-21 12:30',crop:'potato',disease:'Late Blight',severity:'high',accuracy:5,region:'Amhara',lang:'en'},
-    {ts:'2025-05-21 10:15',crop:'enset',disease:'Root Mealybug',severity:'low',accuracy:4,region:'Sidama',lang:'am'},
-    {ts:'2025-05-21 09:00',crop:'sorghum',disease:'Anthracnose',severity:'medium',accuracy:4,region:'Oromia',lang:'om'},
-  ];
-  feedbackData = data;
-  document.getElementById('m-total').textContent = data.length;
-  var prices = {enset:1900,teff:5200,wheat:4600,maize:3500,coffee:11200,potato:2200,barley:3800,sorghum:2800};
-  var etb = data.reduce(function(s,f){ return s+Math.round(15*0.5*({high:0.65,medium:0.35,low:0.15}[f.severity]||0.35)*0.75*(prices[f.crop]||3000)); },0);
-  document.getElementById('m-etb').textContent = Math.round(etb/1000)+'K ETB';
-  document.getElementById('feedback-count').textContent = data.length+' records';
+  // Load live feedback from server (not hardcoded sample data)
+  fetch('/api/feedback', { headers: { 'x-admin-key': _adminKey || '' } })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+      var data = (result.feedback || []).map(function(f) {
+        return {
+          ts: f.ts || f.created_at || '—',
+          crop: f.crop || '—',
+          disease: f.disease || '—',
+          severity: f.accuracy === '5' || f.accuracy === '4' ? 'high' : f.accuracy === '3' ? 'medium' : 'low',
+          accuracy: parseInt(f.accuracy) || 0,
+          region: f.region || '—',
+          lang: f.lang || 'en',
+          comment: f.comment || ''
+        };
+      });
+      feedbackData = data;
+      document.getElementById('m-total').textContent = result.total || data.length;
+      var prices = {enset:1900,teff:5200,wheat:4600,maize:3500,coffee:11200,potato:2200,barley:3800,sorghum:2800};
+      var etb = data.reduce(function(s,f){ return s+Math.round(15*0.5*({high:0.65,medium:0.35,low:0.15}[f.severity]||0.35)*0.75*(prices[f.crop]||3000)); },0);
+      document.getElementById('m-etb').textContent = Math.round(etb/1000)+'K ETB';
+      document.getElementById('feedback-count').textContent = data.length+' records (live)';
 
-  document.getElementById('feedback-tbody').innerHTML = data.map(function(f){
-    var sc = f.severity==='high'?'sev-high':f.severity==='medium'?'sev-med':'sev-low';
-    return '<tr><td style="color:#aaa;font-size:11px;">'+f.ts+'</td>'
-      +'<td style="font-weight:600;text-transform:capitalize;">'+f.crop+'</td>'
-      +'<td>'+f.disease+'</td>'
-      +'<td><span class="'+sc+'">'+f.severity.toUpperCase()+'</span></td>'
-      +'<td style="color:#D4A017;">'+('★'.repeat(f.accuracy||0))+'</td>'
-      +'<td>'+f.region+'</td>'
-      +'<td><span style="background:#f0f0f0;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;">'+f.lang.toUpperCase()+'</span></td></tr>';
-  }).join('');
+      document.getElementById('feedback-tbody').innerHTML = data.length ? data.map(function(f){
+        var sc = f.severity==='high'?'sev-high':f.severity==='medium'?'sev-med':'sev-low';
+        return '<tr><td style="color:#aaa;font-size:11px;">'+f.ts+'</td>'
+          +'<td style="font-weight:600;text-transform:capitalize;">'+f.crop+'</td>'
+          +'<td>'+f.disease+'</td>'
+          +'<td><span class="'+sc+'">'+f.severity.toUpperCase()+'</span></td>'
+          +'<td style="color:#D4A017;">'+('★'.repeat(f.accuracy||0))+'</td>'
+          +'<td>'+f.region+'</td>'
+          +'<td><span style="background:#f0f0f0;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;">'+f.lang.toUpperCase()+'</span></td></tr>';
+      }).join('') : '<tr><td colspan="7" style="text-align:center;color:#aaa;padding:20px;">No feedback records yet. Farmers will appear here after submitting diagnoses.</td></tr>';
 
-  buildCharts(data);
-  buildAccuracy(data);
+      if (data.length > 0) { buildCharts(data); buildAccuracy(data); }
+    })
+    .catch(function(e) {
+      document.getElementById('feedback-tbody').innerHTML = '<tr><td colspan="7" style="color:#B83010;padding:20px;">Failed to load feedback: ' + e.message + '</td></tr>';
+    });
 }
 
 function buildCharts(data) {
