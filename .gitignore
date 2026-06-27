@@ -1,8 +1,12 @@
 node_modules/
 .env
+.env.local
+.env.*.local
 *.log
 .DS_Store
 sebilai.db
 sebilai.db-journal
 sebilai.db-wal
 sebilai.db-shm
+sebilai_dump.sql
+fly.toml.bak

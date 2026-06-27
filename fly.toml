@@ -1,0 +1,34 @@
+# SebilAI — Fly.io config.
+# `fly launch` may regenerate this; if it already exists Fly will reuse it.
+# NOTE: `app` must be globally unique across Fly. If "sebilai" is taken,
+# change it (e.g. "sebilai-app") and re-run `fly deploy`.
+app = "sebilai"
+primary_region = "fra"   # Frankfurt — low latency to Ethiopia/EU. ("ams" also fine.)
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080        # MUST match Dockerfile ENV PORT / app listen port
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0     # sleep when idle (Turso keeps the DB alive regardless)
+  processes = ["app"]
+
+  [http_service.http_options]
+    # keep connections warm enough for AI/SMS round-trips
+    idle_timeout = 120
+
+  # Fly health check hits the lightweight /health route (no DB dependency).
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"            # headroom for 20MB image uploads + AI proxying.
+                             # Drop to 256mb to minimise cost if memory allows.

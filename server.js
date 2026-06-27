@@ -14,110 +14,45 @@ if (JWT_SECRET === 'sebilai-dev-secret-CHANGE-IN-PROD') {
   console.warn('⚠️  WARNING: Using default JWT_SECRET. Set JWT_SECRET env var in production!');
 }
 
-// Separate async sqlite3 connection (the existing `db` above is better-sqlite3
-// with a synchronous API — different package, incompatible call signatures).
-// The new /api/v2/* endpoints use this async connection. SQLite handles
-// multiple connections to the same file fine, especially with WAL mode.
-const sqlite3 = require('sqlite3').verbose();
-const dbAsync = new sqlite3.Database(path.join(__dirname, 'sebilai.db'));
+// ── DATABASE: libSQL / Turso (was better-sqlite3 + sqlite3) ──
+// One async client + helpers (dbAll/dbGet/dbRun) live in db/client.js.
+// Schema + indexes are created by initSchema() during async startup (see
+// startServer() at the bottom of this file). On Fly set TURSO_DATABASE_URL +
+// TURSO_AUTH_TOKEN; locally it falls back to a file:sebilai.db.
+const { db, dbAll, dbGet, dbRun, initSchema } = require('./db/client');
 
-// ── SQLITE PERSISTENCE ────────────────────────────────────
-// Replaces flat JSON files in /tmp — survives restarts and deploys.
-// Uses better-sqlite3 (synchronous API — no promise hell, WAL for speed).
-const Database = require('better-sqlite3');
-const DB_PATH  = process.env.DB_PATH || path.join(__dirname, 'sebilai.db');
-const db       = new Database(DB_PATH);
-
-// Enable WAL mode for better concurrent read performance
-db.pragma('journal_mode = WAL');
-
-// Create tables once
-db.exec(`
-  CREATE TABLE IF NOT EXISTS feedback (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    crop      TEXT, disease TEXT, accuracy TEXT,
-    comment   TEXT, region TEXT, lang TEXT,
-    ts        TEXT
-  );
-  CREATE TABLE IF NOT EXISTS disease_reports (
-    id        INTEGER PRIMARY KEY,
-    crop      TEXT, disease TEXT,
-    lat       REAL, lon REAL,
-    severity  TEXT, lang TEXT, date TEXT,
-    verified  INTEGER DEFAULT 0,
-    source    TEXT DEFAULT 'app'
-  );
-  CREATE TABLE IF NOT EXISTS review_requests (
-    id        INTEGER PRIMARY KEY,
-    crop TEXT, disease TEXT, symptoms TEXT,
-    contact TEXT, lang TEXT, date TEXT,
-    status TEXT DEFAULT 'pending',
-    has_image INTEGER DEFAULT 0,
-    verdict TEXT, notes TEXT, verified_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS push_subscribers (
-    key TEXT PRIMARY KEY,
-    subscription TEXT, lang TEXT,
-    region TEXT, crop TEXT, created_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS sms_subscribers (
-    phone TEXT PRIMARY KEY,
-    region TEXT, crop TEXT, lang TEXT, subscribed_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS followups (
-    id          INTEGER PRIMARY KEY,
-    diagnosis_id TEXT, crop TEXT, disease TEXT,
-    before_date TEXT, after_date TEXT,
-    improvement TEXT, has_image INTEGER DEFAULT 0,
-    created_at  TEXT
-  );
-`);
-
-// Prepared statements
-const stmts = {
-  // feedback
-  insertFeedback: db.prepare(`INSERT INTO feedback (crop,disease,accuracy,comment,region,lang,ts) VALUES (?,?,?,?,?,?,?)`),
-  countFeedback:  db.prepare(`SELECT COUNT(*) AS n FROM feedback`),
-  latestFeedback: db.prepare(`SELECT * FROM feedback ORDER BY id DESC LIMIT 200`),
-  // disease_reports
-  insertReport:   db.prepare(`INSERT OR REPLACE INTO disease_reports (id,crop,disease,lat,lon,severity,lang,date,verified,source) VALUES (?,?,?,?,?,?,?,?,?,?)`),
-  recentReports:  db.prepare(`SELECT * FROM disease_reports WHERE date >= ? ORDER BY id DESC`),
-  countReports:   db.prepare(`SELECT COUNT(*) AS n FROM disease_reports`),
-  todayReports:   db.prepare(`SELECT COUNT(*) AS n FROM disease_reports WHERE date = ?`),
-  // review_requests
-  insertReview:   db.prepare(`INSERT INTO review_requests (id,crop,disease,symptoms,contact,lang,date,status,has_image) VALUES (?,?,?,?,?,?,?,?,?)`),
-  allReviews:     db.prepare(`SELECT * FROM review_requests ORDER BY id DESC`),
-  findReview:     db.prepare(`SELECT * FROM review_requests WHERE id = ?`),
-  verifyReview:   db.prepare(`UPDATE review_requests SET status='verified',verdict=?,notes=?,verified_at=? WHERE id=?`),
-  countVerified:  db.prepare(`SELECT COUNT(*) AS n FROM review_requests WHERE status='verified'`),
-  // push_subscribers
-  upsertPush:     db.prepare(`INSERT OR REPLACE INTO push_subscribers (key,subscription,lang,region,crop,created_at) VALUES (?,?,?,?,?,?)`),
-  deletePush:     db.prepare(`DELETE FROM push_subscribers WHERE key=?`),
-  allPush:        db.prepare(`SELECT * FROM push_subscribers`),
-  countPush:      db.prepare(`SELECT COUNT(*) AS n FROM push_subscribers`),
-  // sms_subscribers
-  upsertSms:      db.prepare(`INSERT OR REPLACE INTO sms_subscribers (phone,region,crop,lang,subscribed_at) VALUES (?,?,?,?,?)`),
-  deleteSms:      db.prepare(`DELETE FROM sms_subscribers WHERE phone=?`),
-  allSms:         db.prepare(`SELECT * FROM sms_subscribers`),
-  countSms:       db.prepare(`SELECT COUNT(*) AS n FROM sms_subscribers`),
-  // followups
-  insertFollowup: db.prepare(`INSERT INTO followups (id,diagnosis_id,crop,disease,before_date,after_date,improvement,has_image,created_at) VALUES (?,?,?,?,?,?,?,?,?)`),
+// Centralized SQL (formerly better-sqlite3 prepared statements). libSQL has no
+// persistent prepared-statement objects, so these are plain strings passed to
+// db.execute({ sql, args }) via the dbRun/dbGet/dbAll helpers.
+const SQL = {
+  insertFeedback: `INSERT INTO feedback (crop,disease,accuracy,comment,region,lang,ts) VALUES (?,?,?,?,?,?,?)`,
+  countFeedback:  `SELECT COUNT(*) AS n FROM feedback`,
+  latestFeedback: `SELECT * FROM feedback ORDER BY id DESC LIMIT 200`,
+  insertReport:   `INSERT OR REPLACE INTO disease_reports (id,crop,disease,lat,lon,severity,lang,date,verified,source) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+  recentReports:  `SELECT * FROM disease_reports WHERE date >= ? ORDER BY id DESC`,
+  countReports:   `SELECT COUNT(*) AS n FROM disease_reports`,
+  todayReports:   `SELECT COUNT(*) AS n FROM disease_reports WHERE date = ?`,
+  insertReview:   `INSERT INTO review_requests (id,crop,disease,symptoms,contact,lang,date,status,has_image) VALUES (?,?,?,?,?,?,?,?,?)`,
+  allReviews:     `SELECT * FROM review_requests ORDER BY id DESC`,
+  findReview:     `SELECT * FROM review_requests WHERE id = ?`,
+  verifyReview:   `UPDATE review_requests SET status='verified',verdict=?,notes=?,verified_at=? WHERE id=?`,
+  countVerified:  `SELECT COUNT(*) AS n FROM review_requests WHERE status='verified'`,
+  upsertPush:     `INSERT OR REPLACE INTO push_subscribers (key,subscription,lang,region,crop,created_at) VALUES (?,?,?,?,?,?)`,
+  deletePush:     `DELETE FROM push_subscribers WHERE key=?`,
+  allPush:        `SELECT * FROM push_subscribers`,
+  upsertSms:      `INSERT OR REPLACE INTO sms_subscribers (phone,region,crop,lang,subscribed_at) VALUES (?,?,?,?,?)`,
+  deleteSms:      `DELETE FROM sms_subscribers WHERE phone=?`,
+  allSms:         `SELECT * FROM sms_subscribers`,
+  insertFollowup: `INSERT INTO followups (id,diagnosis_id,crop,disease,before_date,after_date,improvement,has_image,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
 };
 
-// ── In-memory Maps rebuilt from DB at startup ─────────────
-// These are used by the existing push/SMS scheduler logic unchanged.
+// ── In-memory Maps rebuilt from DB at startup (populated in startServer()) ──
+// Used by the existing push/SMS scheduler logic unchanged.
 const pushSubscriptions = new Map();
 const smsSubscribers    = new Map();
 
-for (const row of stmts.allPush.all()) {
-  try { pushSubscriptions.set(row.key, { subscription: JSON.parse(row.subscription), lang: row.lang, region: row.region, crop: row.crop }); }
-  catch(e) {}
-}
-for (const row of stmts.allSms.all()) {
-  smsSubscribers.set(row.phone, { phone: row.phone, region: row.region, crop: row.crop, lang: row.lang });
-}
-
-// JSON file helpers for new features not yet in SQLite schema
+// JSON file helpers for features not yet in SQLite (note: still ephemeral —
+// these write to DATA_DIR (/tmp by default), which Fly wipes on restart).
 const DATA_DIR = process.env.DATA_DIR || '/tmp/sebilai_data';
 const fs_sync  = require('fs');
 if (!fs_sync.existsSync(DATA_DIR)) fs_sync.mkdirSync(DATA_DIR, { recursive: true });
@@ -136,19 +71,17 @@ function saveJSON(name, data) {
   } catch(e) { console.warn('saveJSON failed:', name, e.message); return false; }
 }
 
-// diseaseReports in-memory array for outbreak detection (mirrors SQLite)
-let diseaseReports = (() => {
-  try { return stmts.recentReports.all('2020-01-01').map(r => ({ ...r })); } catch(e) { return []; }
-})();
-
-console.log(`🗄️  SQLite DB: ${DB_PATH}`);
-console.log(`📂 Loaded: ${stmts.countFeedback.get().n} feedback, ${pushSubscriptions.size} push, ${smsSubscribers.size} SMS subscribers`);
+// diseaseReports in-memory array for outbreak detection (mirrors Turso;
+// loaded in startServer()).
+let diseaseReports = [];
 
 const SERVER_BOOT_TS = Date.now();
 const PORT = process.env.PORT || 3000;
 const GROQ_KEY       = process.env.GROQ_API_KEY;
 const GEMINI_KEY     = process.env.GEMINI_API_KEY;
-const OPENROUTER_KEY = process.env.OpenRouter_API_KEY;
+// v13: standard upper-case name (Fly secret). Falls back to the old mixed-case
+// name so the existing Render secret keeps working during cutover.
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || process.env.OpenRouter_API_KEY;
 const GEE_KEY        = process.env.GEE_SERVICE_ACCOUNT_KEY; // JSON string of service account
 
 if (!GROQ_KEY && !GEMINI_KEY && !OPENROUTER_KEY) {
@@ -787,23 +720,24 @@ async function sendPushNotification(subscription, payload) {
 }
 
 // Subscribe endpoint
-app.post('/api/push-subscribe', (req, res) => {
+app.post('/api/push-subscribe', async (req, res) => {
   const { subscription, lang, region, crop } = req.body;
   if (!subscription || !subscription.endpoint) return res.status(400).json({ error: 'Invalid subscription' });
   const key = subscription.endpoint.slice(-20);
   pushSubscriptions.set(key, { subscription, lang: lang||'en', region: region||'Addis Ababa', crop: crop||'enset' });
-  stmts.upsertPush.run(key, JSON.stringify(subscription), lang||'en', region||'Addis Ababa', crop||'enset', new Date().toISOString());
+  try { await dbRun(SQL.upsertPush, [key, JSON.stringify(subscription), lang||'en', region||'Addis Ababa', crop||'enset', new Date().toISOString()]); }
+  catch (e) { console.error('push-subscribe db error:', e.message); }
   console.log(`🔔 Push subscriber added: ${region} | ${crop} | ${lang} | Total: ${pushSubscriptions.size}`);
   res.json({ ok: true, total: pushSubscriptions.size });
 });
 
 // Unsubscribe endpoint
-app.post('/api/push-unsubscribe', (req, res) => {
+app.post('/api/push-unsubscribe', async (req, res) => {
   const { endpoint } = req.body;
   if (endpoint) {
     const key = endpoint.slice(-20);
     pushSubscriptions.delete(key);
-    stmts.deletePush.run(key);
+    try { await dbRun(SQL.deletePush, [key]); } catch (e) { console.error('push-unsub db error:', e.message); }
     console.log(`🔕 Push subscriber removed. Total: ${pushSubscriptions.size}`);
   }
   res.json({ ok: true });
@@ -922,23 +856,24 @@ const SMS_ALERT_TEMPLATES = {
 };
 
 // Subscribe farmer phone to SMS alerts
-app.post('/api/sms-subscribe', (req, res) => {
+app.post('/api/sms-subscribe', async (req, res) => {
   const { phone, region, crop, lang } = req.body;
   if (!phone) return res.status(400).json({ error: 'Phone required' });
   const cleanPhone = phone.replace(/\s/g, '').replace(/^0/, '+251');
   smsSubscribers.set(cleanPhone, { phone: cleanPhone, region: region||'Addis Ababa', crop: crop||'enset', lang: lang||'en' });
-  stmts.upsertSms.run(cleanPhone, region||'Addis Ababa', crop||'enset', lang||'en', new Date().toISOString());
+  try { await dbRun(SQL.upsertSms, [cleanPhone, region||'Addis Ababa', crop||'enset', lang||'en', new Date().toISOString()]); }
+  catch (e) { console.error('sms-subscribe db error:', e.message); }
   console.log(`📲 SMS subscriber: ${cleanPhone} | ${crop} | ${region} | ${lang} | Total: ${smsSubscribers.size}`);
   res.json({ ok: true, total: smsSubscribers.size });
 });
 
 // Unsubscribe
-app.post('/api/sms-unsubscribe', (req, res) => {
+app.post('/api/sms-unsubscribe', async (req, res) => {
   const { phone } = req.body;
   if (phone) {
     const clean = phone.replace(/\s/g, '').replace(/^0/, '+251');
     smsSubscribers.delete(clean);
-    stmts.deleteSms.run(clean);
+    try { await dbRun(SQL.deleteSms, [clean]); } catch (e) { console.error('sms-unsub db error:', e.message); }
     console.log(`📵 SMS unsubscribed: ${clean}. Total: ${smsSubscribers.size}`);
   }
   res.json({ ok: true });
@@ -1028,36 +963,44 @@ app.post('/api/analyze', async (req, res) => {
 });
 
 // ── FEEDBACK ──────────────────────────────────────────────
-app.post('/api/feedback', (req, res) => {
+app.post('/api/feedback', async (req, res) => {
   const { feedback } = req.body;
   if (!feedback || !Array.isArray(feedback)) return res.status(400).json({ error: 'Invalid' });
-  const insertMany = db.transaction((items) => {
-    for (const f of items) {
-      stmts.insertFeedback.run(f.crop||'', f.disease||'', f.accuracy||'', f.comment||'', f.region||'', f.language||'', new Date().toISOString());
-    }
-  });
-  insertMany(feedback);
-  const total = stmts.countFeedback.get().n;
-  res.json({ ok: true, saved: feedback.length, total });
+  try {
+    // libSQL atomic batch (replaces better-sqlite3 db.transaction)
+    const batch = feedback.map(f => ({
+      sql: SQL.insertFeedback,
+      args: [f.crop||'', f.disease||'', f.accuracy||'', f.comment||'', f.region||'', f.language||'', new Date().toISOString()]
+    }));
+    if (batch.length) await db.batch(batch, 'write');
+    const total = (await dbGet(SQL.countFeedback)).n;
+    res.json({ ok: true, saved: feedback.length, total });
+  } catch (e) {
+    console.error('feedback db error:', e.message);
+    res.status(500).json({ error: 'Failed to save feedback' });
+  }
 });
 
 // Get all feedback (for admin dashboard)
-app.get('/api/feedback', (req, res) => {
+app.get('/api/feedback', async (req, res) => {
   if (!requireAdminKey(req, res)) return;
-  const rows = stmts.latestFeedback.all();
-  res.json({ feedback: rows, total: stmts.countFeedback.get().n });
+  try {
+    const rows = await dbAll(SQL.latestFeedback);
+    res.json({ feedback: rows, total: (await dbGet(SQL.countFeedback)).n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── HEALTH ────────────────────────────────────────────────
-app.post('/api/sync-feedback', (req, res) => {
+app.post('/api/sync-feedback', async (req, res) => {
   // Called by service worker background sync
-  res.json({ ok: true, synced: stmts.countFeedback.get().n });
+  try { res.json({ ok: true, synced: (await dbGet(SQL.countFeedback)).n }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   // DB connectivity probe — never throws, surfaces failure in body
   let dbOk = false, dbError = null;
-  try { dbOk = !!stmts.countFeedback.get(); }
+  try { dbOk = !!(await dbGet(SQL.countFeedback)); }
   catch (e) { dbError = e.message; }
   res.json({
     status:     dbOk ? 'ok' : 'degraded',
@@ -1076,12 +1019,13 @@ app.get('/api/health', (req, res) => {
 });
 
 // ── COMMUNITY DISEASE REPORTS (for heatmap) ──────────────
-app.post('/api/community-report', (req, res) => {
+app.post('/api/community-report', async (req, res) => {
   const { crop, disease, lat, lon, severity, lang } = req.body;
   if (!crop || !disease || !lat || !lon) return res.status(400).json({ error: 'Missing fields' });
   const id = Date.now();
   const parsedLat = parseFloat(lat), parsedLon = parseFloat(lon);
-  stmts.insertReport.run(id, crop.toLowerCase(), disease, parsedLat, parsedLon, severity||'Medium', lang||'en', new Date().toISOString().split('T')[0], 0, 'app');
+  try { await dbRun(SQL.insertReport, [id, crop.toLowerCase(), disease, parsedLat, parsedLon, severity||'Medium', lang||'en', new Date().toISOString().split('T')[0], 0, 'app']); }
+  catch (e) { console.error('community-report db error:', e.message); return res.status(500).json({ error: 'Failed to save report' }); }
   // Keep in-memory array in sync for outbreak detection
   diseaseReports.push({ id, crop: crop.toLowerCase(), disease, lat: parsedLat, lon: parsedLon, severity: severity||'Medium', date: new Date().toISOString().split('T')[0] });
   if (diseaseReports.length > 1000) diseaseReports = diseaseReports.slice(-1000);
@@ -1091,42 +1035,49 @@ app.post('/api/community-report', (req, res) => {
   res.json({ ok: true, id });
 });
 
-app.get('/api/community-reports', (req, res) => {
+app.get('/api/community-reports', async (req, res) => {
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const recent = stmts.recentReports.all(cutoff).map(r => ({
-    crop: r.crop,
-    disease: r.disease,
-    lat: Math.round(r.lat * 10) / 10,
-    lon: Math.round(r.lon * 10) / 10,
-    severity: r.severity,
-    date: r.date,
-    verified: !!r.verified
-  }));
-  res.json({ reports: recent, total: recent.length });
+  try {
+    const rows = await dbAll(SQL.recentReports, [cutoff]);
+    const recent = rows.map(r => ({
+      crop: r.crop,
+      disease: r.disease,
+      lat: Math.round(r.lat * 10) / 10,
+      lon: Math.round(r.lon * 10) / 10,
+      severity: r.severity,
+      date: r.date,
+      verified: !!r.verified
+    }));
+    res.json({ reports: recent, total: recent.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── AGRONOMIST FLAG / EXPERT REVIEW ──────────────────────
-app.post('/api/flag-review', (req, res) => {
+app.post('/api/flag-review', async (req, res) => {
   const { crop, disease, symptoms, imageBase64, contact, lang } = req.body;
   if (!crop || !disease) return res.status(400).json({ error: 'Missing fields' });
   const id = Date.now();
-  stmts.insertReview.run(id, crop, disease, JSON.stringify(symptoms||[]), contact||'anonymous', lang||'en', new Date().toISOString(), 'pending', imageBase64 ? 1 : 0);
+  try { await dbRun(SQL.insertReview, [id, crop, disease, JSON.stringify(symptoms||[]), contact||'anonymous', lang||'en', new Date().toISOString(), 'pending', imageBase64 ? 1 : 0]); }
+  catch (e) { console.error('flag-review db error:', e.message); return res.status(500).json({ error: 'Failed to save review request' }); }
   console.log(`🔬 Review request: ${disease} on ${crop} from ${contact||'anon'}`);
   res.json({ ok: true, id, message: 'An agronomist will review your case within 48 hours.' });
 });
 
-app.get('/api/review-requests', (req, res) => {
+app.get('/api/review-requests', async (req, res) => {
   if (!requireAdminKey(req, res)) return;
-  res.json({ requests: stmts.allReviews.all() });
+  try { res.json({ requests: await dbAll(SQL.allReviews) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/review-verify', (req, res) => {
+app.post('/api/review-verify', async (req, res) => {
   if (!requireAdminKey(req, res)) return;
   const { id, verdict, notes } = req.body;
-  const r = stmts.findReview.get(id);
-  if (!r) return res.status(404).json({ error: 'Not found' });
-  stmts.verifyReview.run(verdict || '', notes || '', new Date().toISOString(), id);
-  res.json({ ok: true });
+  try {
+    const r = await dbGet(SQL.findReview, [id]);
+    if (!r) return res.status(404).json({ error: 'Not found' });
+    await dbRun(SQL.verifyReview, [verdict || '', notes || '', new Date().toISOString(), id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── SMS INCOMING DIAGNOSIS (Africa's Talking webhook) ─────
@@ -1185,7 +1136,8 @@ app.post('/api/sms/incoming', async (req, res) => {
   await sendSMS(from, reply);
 
   // Log as community report (no GPS from SMS — use Ethiopia centroid)
-  stmts.insertReport.run(Date.now(), crop.toLowerCase(), symptoms, 9.0, 40.0, 'Unknown', 'en', new Date().toISOString().split('T')[0], 0, 'sms');
+  try { await dbRun(SQL.insertReport, [Date.now(), crop.toLowerCase(), symptoms, 9.0, 40.0, 'Unknown', 'en', new Date().toISOString().split('T')[0], 0, 'sms']); }
+  catch (e) { console.error('sms insertReport db error:', e.message); }
 
   res.status(200).send('OK');
 });
@@ -1205,33 +1157,38 @@ app.get('/api/weather', async (req, res) => {
 });
 
 // ── BEFORE/AFTER PHOTO TRACKING ───────────────────────────
-app.post('/api/followup', (req, res) => {
+app.post('/api/followup', async (req, res) => {
   const { diagnosisId, crop, disease, beforeDate, afterDate, imageBase64, improvement } = req.body;
   if (!crop || !disease) return res.status(400).json({ error: 'Missing fields' });
   const id = Date.now();
-  stmts.insertFollowup.run(
-    id, diagnosisId||null, crop, disease,
-    beforeDate || new Date(Date.now() - 7*24*60*60*1000).toISOString().split('T')[0],
-    afterDate  || new Date().toISOString().split('T')[0],
-    improvement||null, imageBase64 ? 1 : 0, new Date().toISOString()
-  );
+  try {
+    await dbRun(SQL.insertFollowup, [
+      id, diagnosisId||null, crop, disease,
+      beforeDate || new Date(Date.now() - 7*24*60*60*1000).toISOString().split('T')[0],
+      afterDate  || new Date().toISOString().split('T')[0],
+      improvement||null, imageBase64 ? 1 : 0, new Date().toISOString()
+    ]);
+  } catch (e) { console.error('followup db error:', e.message); return res.status(500).json({ error: 'Failed to save follow-up' }); }
   console.log(`📸 Follow-up: ${crop} (${disease}) — improvement: ${improvement||'not rated'}`);
   res.json({ ok: true, id });
 });
 
 // ── ENHANCED HEALTH (with live stats) ────────────────────
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
   const today = new Date().toISOString().split('T')[0];
-  const todayCount  = stmts.todayReports.get(today).n;
-  const totalCount  = stmts.countReports.get().n;
-  res.json({
-    diagnosesToday:   todayCount,
-    diagnosesTotal:   Math.max(totalCount, 1247),
-    communityReports: totalCount,
-    verifiedCases:    stmts.countVerified.get().n,
-    smsUsers:         smsSubscribers.size,
-    pushUsers:        pushSubscriptions.size
-  });
+  try {
+    const todayCount  = (await dbGet(SQL.todayReports, [today])).n;
+    const totalCount  = (await dbGet(SQL.countReports)).n;
+    const verified    = (await dbGet(SQL.countVerified)).n;
+    res.json({
+      diagnosesToday:   todayCount,
+      diagnosesTotal:   Math.max(totalCount, 1247),
+      communityReports: totalCount,
+      verifiedCases:    verified,
+      smsUsers:         smsSubscribers.size,
+      pushUsers:        pushSubscriptions.size
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ══════════════════════════════════════════════════════════
@@ -1704,53 +1661,48 @@ app.post('/api/v2/auth/register', async (req, res) => {
     if (!username || !password || password.length < 8) {
       return res.status(400).json({ error: 'Username and password (min 8 chars) required' });
     }
-    dbAsync.get("SELECT COUNT(*) as count FROM users", [], async (err, row) => {
-      if (err) return res.status(500).json({ error: err.message });
-      const isFirstUser = row.count === 0;
-      const userRole = isFirstUser ? 'admin' : (role || 'agronomist');
-      if (!isFirstUser) {
-        const authHeader = req.headers.authorization;
-        if (!authHeader) return res.status(401).json({ error: 'Only admins can create new users' });
-        try {
-          const token = authHeader.split(' ')[1];
-          const decoded = jwt.verify(token, JWT_SECRET);
-          if (decoded.role !== 'admin') {
-            return res.status(403).json({ error: 'Only admins can create new users' });
-          }
-        } catch (e) {
-          return res.status(403).json({ error: 'Invalid admin token' });
+    const countRow = await dbGet("SELECT COUNT(*) as count FROM users");
+    const isFirstUser = Number(countRow.count) === 0;
+    const userRole = isFirstUser ? 'admin' : (role || 'agronomist');
+    if (!isFirstUser) {
+      const authHeader = req.headers.authorization;
+      if (!authHeader) return res.status(401).json({ error: 'Only admins can create new users' });
+      try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded.role !== 'admin') {
+          return res.status(403).json({ error: 'Only admins can create new users' });
         }
+      } catch (e) {
+        return res.status(403).json({ error: 'Invalid admin token' });
       }
-      const hashed = await bcrypt.hash(password, 10);
-      dbAsync.run("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-        [username, hashed, userRole],
-        function(err) {
-          if (err) {
-            if (err.message.includes('UNIQUE')) {
-              return res.status(409).json({ error: 'Username already exists' });
-            }
-            return res.status(500).json({ error: err.message });
-          }
-          res.status(201).json({
-            success: true,
-            user_id: this.lastID,
-            role: userRole,
-            message: isFirstUser ? 'First admin user created!' : 'User created'
-          });
-        });
-    });
+    }
+    const hashed = await bcrypt.hash(password, 10);
+    try {
+      const r = await dbRun("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", [username, hashed, userRole]);
+      res.status(201).json({
+        success: true,
+        user_id: r.lastInsertRowid != null ? Number(r.lastInsertRowid) : undefined,
+        role: userRole,
+        message: isFirstUser ? 'First admin user created!' : 'User created'
+      });
+    } catch (e) {
+      if ((e.message || '').includes('UNIQUE')) return res.status(409).json({ error: 'Username already exists' });
+      return res.status(500).json({ error: e.message });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post('/api/v2/auth/login', (req, res) => {
+app.post('/api/v2/auth/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required' });
   }
-  dbAsync.get("SELECT * FROM users WHERE username = ?", [username], async (err, user) => {
-    if (err || !user || !(await bcrypt.compare(password, user.password))) {
+  try {
+    const user = await dbGet("SELECT * FROM users WHERE username = ?", [username]);
+    if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const token = jwt.sign(
@@ -1759,85 +1711,81 @@ app.post('/api/v2/auth/login', (req, res) => {
       { expiresIn: '7d' }
     );
     res.json({ success: true, token, role: user.role, username: user.username });
-  });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ====================== CROPS & DISEASES (DB-backed) ======================
-app.get('/api/v2/crops', (req, res) => {
-  dbAsync.all("SELECT * FROM crops ORDER BY name", [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows || []);
-  });
+app.get('/api/v2/crops', async (req, res) => {
+  try { res.json(await dbAll("SELECT * FROM crops ORDER BY name")); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/v2/crops/:cropId/diseases', (req, res) => {
-  dbAsync.all("SELECT * FROM diseases WHERE crop_id = ?",
-    [req.params.cropId],
-    (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows || []);
-    });
+app.get('/api/v2/crops/:cropId/diseases', async (req, res) => {
+  try { res.json(await dbAll("SELECT * FROM diseases WHERE crop_id = ?", [req.params.cropId])); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ====================== STATS ======================
-app.get('/api/v2/stats', (req, res) => {
-  dbAsync.get("SELECT * FROM stats_cache WHERE id = 1", [], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
+app.get('/api/v2/stats', async (req, res) => {
+  try {
+    const row = await dbGet("SELECT * FROM stats_cache WHERE id = 1");
     res.json(row || { total_diagnoses: 0, total_impact_etb: 0 });
-  });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ====================== DIAGNOSES ======================
-app.post('/api/v2/diagnoses', (req, res) => {
+app.post('/api/v2/diagnoses', async (req, res) => {
   const result = DiagnosisSchema.safeParse(req.body);
   if (!result.success) {
     return res.status(400).json({ error: 'Validation failed', details: result.error.errors });
   }
   const d = result.data;
-  dbAsync.run(`
-    INSERT INTO diagnoses
-    (farmer_id, crop_id, disease_id, disease_name, severity, confidence,
-     photo_url, latitude, longitude, region, notes, impact_etb)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `, [
-    d.farmer_id || 'anonymous', d.crop_id, d.disease_id || null, d.disease_name,
-    d.severity, d.confidence, d.photo_url || null, d.latitude || null,
-    d.longitude || null, d.region, d.notes || null, d.impact_etb || 0
-  ], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    dbAsync.run(`UPDATE stats_cache SET total_diagnoses = total_diagnoses + 1,
+  try {
+    const r = await dbRun(`
+      INSERT INTO diagnoses
+      (farmer_id, crop_id, disease_id, disease_name, severity, confidence,
+       photo_url, latitude, longitude, region, notes, impact_etb)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      d.farmer_id || 'anonymous', d.crop_id, d.disease_id || null, d.disease_name,
+      d.severity, d.confidence, d.photo_url || null, d.latitude || null,
+      d.longitude || null, d.region, d.notes || null, d.impact_etb || 0
+    ]);
+    await dbRun(`UPDATE stats_cache SET total_diagnoses = total_diagnoses + 1,
             total_impact_etb = total_impact_etb + ?, last_updated = CURRENT_TIMESTAMP`,
            [d.impact_etb || 0]);
-    res.json({ success: true, diagnosis_id: this.lastID });
-  });
+    res.json({ success: true, diagnosis_id: r.lastInsertRowid != null ? Number(r.lastInsertRowid) : undefined });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Admin-only: full diagnosis list
-app.get('/api/v2/diagnoses', authenticateJWT, (req, res) => {
-  dbAsync.all("SELECT * FROM diagnoses ORDER BY created_at DESC LIMIT 100", [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows || []);
-  });
+app.get('/api/v2/diagnoses', authenticateJWT, async (req, res) => {
+  try { res.json(await dbAll("SELECT * FROM diagnoses ORDER BY created_at DESC LIMIT 100")); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ====================== OUTBREAK MAP (with privacy rounding) ======================
 // Latitude/longitude rounded to 2 decimals (~1km precision) for farmer privacy.
-app.get('/api/v2/outbreaks/map', (req, res) => {
-  dbAsync.all(`
-    SELECT region,
-           ROUND(latitude, 2) as latitude,
-           ROUND(longitude, 2) as longitude,
-           disease_name,
-           COUNT(*) as report_count
-    FROM diagnoses
-    WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-    GROUP BY disease_name, region, ROUND(latitude, 2), ROUND(longitude, 2)
-    HAVING report_count >= 3
-  `, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
+app.get('/api/v2/outbreaks/map', async (req, res) => {
+  try {
+    const rows = await dbAll(`
+      SELECT region,
+             ROUND(latitude, 2) as latitude,
+             ROUND(longitude, 2) as longitude,
+             disease_name,
+             COUNT(*) as report_count
+      FROM diagnoses
+      WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+      GROUP BY disease_name, region, ROUND(latitude, 2), ROUND(longitude, 2)
+      HAVING report_count >= 3
+    `);
     res.json({
       type: "FeatureCollection",
-      features: (rows || []).map(r => ({
+      features: rows.map(r => ({
         type: "Feature",
         geometry: { type: "Point", coordinates: [r.longitude, r.latitude] },
         properties: {
@@ -1848,7 +1796,7 @@ app.get('/api/v2/outbreaks/map', (req, res) => {
         }
       }))
     });
-  });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ====================== VOICE: SPEECH-TO-TEXT (Addis AI proxy) ======================
@@ -2014,12 +1962,45 @@ app.get('/api/v2/voice/diag', async (req, res) => {
   });
 });
 
+// Lightweight health check for Fly + UptimeRobot (no DB hit — always cheap).
+app.get('/health', (_req, res) => res.status(200).json({ ok: true }));
+
 app.get('*', (req, res) => res.sendFile(preferRoot('index.html')));
 
-app.listen(PORT, () => {
-  console.log(`\n🌿 SebilAI v3.0`);
-  console.log(`   Groq:       ${GROQ_KEY       ? '✅' : '❌'}`);
-  console.log(`   OpenRouter: ${OPENROUTER_KEY ? '✅' : '❌'}`);
-  console.log(`   Gemini:     ${GEMINI_KEY     ? '✅' : '❌'}`);
-  console.log(`   Satellite:  ${GEE_KEY        ? '✅ GEE' : '🟡 Demo'}\n`);
-});
+// ── ASYNC STARTUP ──────────────────────────────────────────
+// libSQL is async, so schema creation + the in-memory rebuilds that used to
+// run synchronously at module load now happen here, before we accept traffic.
+async function startServer() {
+  try {
+    await initSchema();
+    console.log('🗄️  Turso/libSQL schema ready');
+  } catch (e) {
+    console.error('❌ DB schema init failed:', e.message);
+  }
+
+  // Rebuild push/SMS Maps + the diseaseReports array from the database.
+  try {
+    for (const row of await dbAll(SQL.allPush)) {
+      try { pushSubscriptions.set(row.key, { subscription: JSON.parse(row.subscription), lang: row.lang, region: row.region, crop: row.crop }); } catch(e) {}
+    }
+    for (const row of await dbAll(SQL.allSms)) {
+      smsSubscribers.set(row.phone, { phone: row.phone, region: row.region, crop: row.crop, lang: row.lang });
+    }
+    diseaseReports = (await dbAll(SQL.recentReports, ['2020-01-01'])).map(r => ({ ...r }));
+    const fb = (await dbGet(SQL.countFeedback)).n;
+    console.log(`📂 Loaded: ${fb} feedback, ${pushSubscriptions.size} push, ${smsSubscribers.size} SMS subscribers`);
+  } catch (e) {
+    console.error('⚠️  Startup data load failed (continuing):', e.message);
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n🌿 SebilAI v3.0  ·  listening on 0.0.0.0:${PORT}`);
+    console.log(`   Groq:       ${GROQ_KEY       ? '✅' : '❌'}`);
+    console.log(`   OpenRouter: ${OPENROUTER_KEY ? '✅' : '❌'}`);
+    console.log(`   Gemini:     ${GEMINI_KEY     ? '✅' : '❌'}`);
+    console.log(`   Satellite:  ${GEE_KEY        ? '✅ GEE' : '🟡 Demo'}`);
+    console.log(`   Database:   ${process.env.TURSO_DATABASE_URL ? '✅ Turso (libSQL)' : '🟡 local file:sebilai.db'}\n`);
+  });
+}
+
+startServer();
