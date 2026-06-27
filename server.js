@@ -19,7 +19,7 @@ if (JWT_SECRET === 'sebilai-dev-secret-CHANGE-IN-PROD') {
 // Schema + indexes are created by initSchema() during async startup (see
 // startServer() at the bottom of this file). On Fly set TURSO_DATABASE_URL +
 // TURSO_AUTH_TOKEN; locally it falls back to a file:sebilai.db.
-const { db, dbAll, dbGet, dbRun, initSchema } = require('./db/client');
+const { db, dbAll, dbGet, dbRun, initSchema, withRetry } = require('./db/client');
 
 // Centralized SQL (formerly better-sqlite3 prepared statements). libSQL has no
 // persistent prepared-statement objects, so these are plain strings passed to
@@ -998,9 +998,11 @@ app.post('/api/sync-feedback', async (req, res) => {
 });
 
 app.get('/api/health', async (req, res) => {
-  // DB connectivity probe — never throws, surfaces failure in body
+  // DB connectivity probe — never throws, surfaces failure in body.
+  // withRetry absorbs a single cold-start "fetch failed" so a freshly-woken
+  // machine doesn't report "degraded" on the first probe.
   let dbOk = false, dbError = null;
-  try { dbOk = !!(await dbGet(SQL.countFeedback)); }
+  try { dbOk = !!(await withRetry(() => dbGet(SQL.countFeedback), 'health db check')); }
   catch (e) { dbError = e.message; }
   res.json({
     status:     dbOk ? 'ok' : 'degraded',
@@ -1979,18 +1981,24 @@ async function startServer() {
   }
 
   // Rebuild push/SMS Maps + the diseaseReports array from the database.
+  // Wrapped in withRetry so a cold-start "fetch failed" doesn't lose the data;
+  // if it still fails we keep running (Maps just start empty and refill on use).
   try {
-    for (const row of await dbAll(SQL.allPush)) {
-      try { pushSubscriptions.set(row.key, { subscription: JSON.parse(row.subscription), lang: row.lang, region: row.region, crop: row.crop }); } catch(e) {}
-    }
-    for (const row of await dbAll(SQL.allSms)) {
-      smsSubscribers.set(row.phone, { phone: row.phone, region: row.region, crop: row.crop, lang: row.lang });
-    }
-    diseaseReports = (await dbAll(SQL.recentReports, ['2020-01-01'])).map(r => ({ ...r }));
-    const fb = (await dbGet(SQL.countFeedback)).n;
+    await withRetry(async () => {
+      pushSubscriptions.clear();
+      for (const row of await dbAll(SQL.allPush)) {
+        try { pushSubscriptions.set(row.key, { subscription: JSON.parse(row.subscription), lang: row.lang, region: row.region, crop: row.crop }); } catch(e) {}
+      }
+      smsSubscribers.clear();
+      for (const row of await dbAll(SQL.allSms)) {
+        smsSubscribers.set(row.phone, { phone: row.phone, region: row.region, crop: row.crop, lang: row.lang });
+      }
+      diseaseReports = (await dbAll(SQL.recentReports, ['2020-01-01'])).map(r => ({ ...r }));
+    }, 'startup data load');
+    const fb = (await withRetry(() => dbGet(SQL.countFeedback), 'startup feedback count')).n;
     console.log(`📂 Loaded: ${fb} feedback, ${pushSubscriptions.size} push, ${smsSubscribers.size} SMS subscribers`);
   } catch (e) {
-    console.error('⚠️  Startup data load failed (continuing):', e.message);
+    console.error('⚠️  Startup data load failed after retries (continuing, will refill on demand):', e.message);
   }
 
   app.listen(PORT, '0.0.0.0', () => {

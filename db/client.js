@@ -27,6 +27,43 @@ async function dbAll(sql, args = []) { return rsToObjs(await db.execute({ sql, a
 async function dbGet(sql, args = []) { return rsToObjs(await db.execute({ sql, args }))[0]; }
 async function dbRun(sql, args = []) { return db.execute({ sql, args }); }
 
+// ── cold-start retry-with-backoff ──────────────────────────
+// Fly scales the machine to zero when idle; on the first request the HTTP/2
+// connection to Turso (aws-us-east-1, ~120ms from fra) isn't settled yet, so
+// the first libSQL query throws "fetch failed". It works on the next attempt.
+// Retry ONLY transient connection/network errors — never SQL/logic errors.
+const RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000]; // up to 5 attempts
+
+function isTransientDbError(err) {
+  const parts = [];
+  let e = err;
+  // walk the cause chain (undici wraps the real socket error in err.cause)
+  for (let i = 0; e && i < 4; i++) { parts.push(String(e.message || ''), String(e.code || '')); e = e.cause; }
+  const blob = parts.join(' ').toLowerCase();
+  return /fetch failed|network|timeout|timed out|etimedout|econnreset|econnrefused|enotfound|eai_again|socket hang up|und_err|connect|stream closed|other side closed/.test(blob);
+}
+
+// Runs fn(); on a transient error waits RETRY_DELAYS_MS[i] and retries.
+// Non-transient errors (e.g. SQL syntax) throw immediately. After the last
+// attempt the error is rethrown so callers can decide what to do.
+async function withRetry(fn, label = 'db op') {
+  const max = RETRY_DELAYS_MS.length;
+  for (let attempt = 1; attempt <= max; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isTransientDbError(err)) throw err;          // SQL/logic error → fail fast
+      if (attempt === max) {
+        console.error(`[db retry] ${label}: attempt ${attempt}/${max} failed (${err.message}) — giving up`);
+        throw err;
+      }
+      const delay = RETRY_DELAYS_MS[attempt - 1];
+      console.warn(`[db retry] ${label}: attempt ${attempt}/${max} failed (${err.message}) — retrying in ${delay}ms`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
 // ── schema + indexes (idempotent) ──
 // Folds BOTH former driver groups (better-sqlite3 tables + the sqlite3
 // init_db.js tables) into one place. Indexes cover every column used in a
@@ -116,7 +153,11 @@ async function initSchema() {
     // ── seed the singleton stats row ──
     `INSERT OR IGNORE INTO stats_cache (id) VALUES (1)`
   ];
-  for (const sql of ddl) await db.execute(sql);
+  // Retry the whole DDL block — it's idempotent (IF NOT EXISTS / INSERT OR
+  // IGNORE), so re-running after a cold-start "fetch failed" is safe.
+  await withRetry(async () => {
+    for (const sql of ddl) await db.execute(sql);
+  }, 'initSchema');
 }
 
-module.exports = { db, dbAll, dbGet, dbRun, initSchema };
+module.exports = { db, dbAll, dbGet, dbRun, initSchema, withRetry };
