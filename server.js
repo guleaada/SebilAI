@@ -522,19 +522,23 @@ async function tryGroq(parts, satContext) {
     if (p.text) content.push({ type: 'text', text: p.text });
     if (p.inline_data) content.push({ type: 'image_url', image_url: { url: `data:${p.inline_data.mime_type};base64,${p.inline_data.data}` } });
   });
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 10000); // fail fast instead of hanging
   try {
     console.log('📡 Trying Groq...');
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
-      body: JSON.stringify({ model: 'meta-llama/llama-4-scout-17b-16e-instruct', messages: [{ role: 'user', content }], max_tokens: 1600, temperature: 0.3 })
+      body: JSON.stringify({ model: 'meta-llama/llama-4-scout-17b-16e-instruct', messages: [{ role: 'user', content }], max_tokens: 1600, temperature: 0.3 }),
+      signal: controller.signal
     });
+    clearTimeout(t);
     const data = await res.json();
     if (!res.ok) { console.error('❌ Groq:', data?.error?.message); return null; }
     const text = data.choices?.[0]?.message?.content || '';
     console.log('✅ Groq success!');
     return { candidates: [{ content: { parts: [{ text }] } }] };
-  } catch(e) { console.error('Groq error:', e.message); return null; }
+  } catch(e) { clearTimeout(t); console.error('Groq error:', e.message); return null; }
 }
 
 // ── OPENROUTER (Secondary) ────────────────────────────────
@@ -546,19 +550,23 @@ async function tryOpenRouter(parts, satContext) {
     if (p.text) content.push({ type: 'text', text: p.text });
     if (p.inline_data) content.push({ type: 'image_url', image_url: { url: `data:${p.inline_data.mime_type};base64,${p.inline_data.data}` } });
   });
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 10000); // fail fast instead of hanging
   try {
     console.log('📡 Trying OpenRouter...');
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENROUTER_KEY}`, 'HTTP-Referer': 'https://sebilai.com' },
-      body: JSON.stringify({ model: 'meta-llama/llama-3.2-11b-vision-instruct:free', messages: [{ role: 'user', content }], max_tokens: 1600 })
+      body: JSON.stringify({ model: 'meta-llama/llama-3.2-11b-vision-instruct:free', messages: [{ role: 'user', content }], max_tokens: 1600 }),
+      signal: controller.signal
     });
+    clearTimeout(t);
     const data = await res.json();
     if (!res.ok) { console.error('❌ OpenRouter:', data?.error?.message); return null; }
     const text = data.choices?.[0]?.message?.content || '';
     console.log('✅ OpenRouter success!');
     return { candidates: [{ content: { parts: [{ text }] } }] };
-  } catch(e) { console.error('OpenRouter error:', e.message); return null; }
+  } catch(e) { clearTimeout(t); console.error('OpenRouter error:', e.message); return null; }
 }
 
 // ── GEMINI (Last resort) ──────────────────────────────────
@@ -567,12 +575,16 @@ async function tryGemini(parts, satContext) {
   const enhanced = enhancePrompt(parts, satContext);
   const models = ['gemini-2.0-flash-lite','gemini-2.0-flash','gemini-1.5-flash'];
   for (const name of models) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 10000); // fail fast instead of hanging
     try {
       console.log(`📡 Trying Gemini ${name}...`);
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${name}:generateContent?key=${GEMINI_KEY}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: enhanced }], generationConfig: { temperature: 0.3, maxOutputTokens: 1600 } })
+        body: JSON.stringify({ contents: [{ parts: enhanced }], generationConfig: { temperature: 0.3, maxOutputTokens: 1600 } }),
+        signal: controller.signal
       });
+      clearTimeout(t);
       if (res.ok) { console.log(`✅ Gemini ${name}!`); return res.json(); }
       const err = await res.text();
       if (res.status === 400 || res.status === 403) {
@@ -580,8 +592,8 @@ async function tryGemini(parts, satContext) {
         try { msg = JSON.parse(err).error?.message || msg; } catch {}
         return { _geminiError: msg };
       }
-      await sleep(2000);
-    } catch(e) { console.error('Gemini error:', e.message); }
+      await sleep(500);
+    } catch(e) { clearTimeout(t); console.error('Gemini error:', e.message); }
   }
   return null;
 }
