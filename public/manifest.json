@@ -1,7 +1,7 @@
 {
-  "name": "Resilience Guardian",
-  "short_name": "ResGuardian",
-  "description": "AI Crop Disease Advisor for Ethiopian Farmers - Works Offline",
+  "name": "SebilAI",
+  "short_name": "SebilAI",
+  "description": "SebilAI — AI Crop Disease Advisor for Ethiopian Farmers. Works offline.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

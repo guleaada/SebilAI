@@ -6,103 +6,53 @@ const path    = require('path');
 const app  = express();
 const fs   = require('fs');
 
-// ── SQLITE PERSISTENCE ────────────────────────────────────
-// Replaces flat JSON files in /tmp — survives restarts and deploys.
-// Uses better-sqlite3 (synchronous API — no promise hell, WAL for speed).
-const Database = require('better-sqlite3');
-const DB_PATH  = process.env.DB_PATH || path.join(__dirname, 'sebilai.db');
-const db       = new Database(DB_PATH);
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const { z } = require('zod');
+const JWT_SECRET = process.env.JWT_SECRET || 'sebilai-dev-secret-CHANGE-IN-PROD';
+if (JWT_SECRET === 'sebilai-dev-secret-CHANGE-IN-PROD') {
+  console.warn('⚠️  WARNING: Using default JWT_SECRET. Set JWT_SECRET env var in production!');
+}
 
-// Enable WAL mode for better concurrent read performance
-db.pragma('journal_mode = WAL');
+// ── DATABASE: libSQL / Turso (was better-sqlite3 + sqlite3) ──
+// One async client + helpers (dbAll/dbGet/dbRun) live in db/client.js.
+// Schema + indexes are created by initSchema() during async startup (see
+// startServer() at the bottom of this file). On Fly set TURSO_DATABASE_URL +
+// TURSO_AUTH_TOKEN; locally it falls back to a file:sebilai.db.
+const { db, dbAll, dbGet, dbRun, initSchema, withRetry } = require('./db/client');
 
-// Create tables once
-db.exec(`
-  CREATE TABLE IF NOT EXISTS feedback (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    crop      TEXT, disease TEXT, accuracy TEXT,
-    comment   TEXT, region TEXT, lang TEXT,
-    ts        TEXT
-  );
-  CREATE TABLE IF NOT EXISTS disease_reports (
-    id        INTEGER PRIMARY KEY,
-    crop      TEXT, disease TEXT,
-    lat       REAL, lon REAL,
-    severity  TEXT, lang TEXT, date TEXT,
-    verified  INTEGER DEFAULT 0,
-    source    TEXT DEFAULT 'app'
-  );
-  CREATE TABLE IF NOT EXISTS review_requests (
-    id        INTEGER PRIMARY KEY,
-    crop TEXT, disease TEXT, symptoms TEXT,
-    contact TEXT, lang TEXT, date TEXT,
-    status TEXT DEFAULT 'pending',
-    has_image INTEGER DEFAULT 0,
-    verdict TEXT, notes TEXT, verified_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS push_subscribers (
-    key TEXT PRIMARY KEY,
-    subscription TEXT, lang TEXT,
-    region TEXT, crop TEXT, created_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS sms_subscribers (
-    phone TEXT PRIMARY KEY,
-    region TEXT, crop TEXT, lang TEXT, subscribed_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS followups (
-    id          INTEGER PRIMARY KEY,
-    diagnosis_id TEXT, crop TEXT, disease TEXT,
-    before_date TEXT, after_date TEXT,
-    improvement TEXT, has_image INTEGER DEFAULT 0,
-    created_at  TEXT
-  );
-`);
-
-// Prepared statements
-const stmts = {
-  // feedback
-  insertFeedback: db.prepare(`INSERT INTO feedback (crop,disease,accuracy,comment,region,lang,ts) VALUES (?,?,?,?,?,?,?)`),
-  countFeedback:  db.prepare(`SELECT COUNT(*) AS n FROM feedback`),
-  latestFeedback: db.prepare(`SELECT * FROM feedback ORDER BY id DESC LIMIT 200`),
-  // disease_reports
-  insertReport:   db.prepare(`INSERT OR REPLACE INTO disease_reports (id,crop,disease,lat,lon,severity,lang,date,verified,source) VALUES (?,?,?,?,?,?,?,?,?,?)`),
-  recentReports:  db.prepare(`SELECT * FROM disease_reports WHERE date >= ? ORDER BY id DESC`),
-  countReports:   db.prepare(`SELECT COUNT(*) AS n FROM disease_reports`),
-  todayReports:   db.prepare(`SELECT COUNT(*) AS n FROM disease_reports WHERE date = ?`),
-  // review_requests
-  insertReview:   db.prepare(`INSERT INTO review_requests (id,crop,disease,symptoms,contact,lang,date,status,has_image) VALUES (?,?,?,?,?,?,?,?,?)`),
-  allReviews:     db.prepare(`SELECT * FROM review_requests ORDER BY id DESC`),
-  findReview:     db.prepare(`SELECT * FROM review_requests WHERE id = ?`),
-  verifyReview:   db.prepare(`UPDATE review_requests SET status='verified',verdict=?,notes=?,verified_at=? WHERE id=?`),
-  countVerified:  db.prepare(`SELECT COUNT(*) AS n FROM review_requests WHERE status='verified'`),
-  // push_subscribers
-  upsertPush:     db.prepare(`INSERT OR REPLACE INTO push_subscribers (key,subscription,lang,region,crop,created_at) VALUES (?,?,?,?,?,?)`),
-  deletePush:     db.prepare(`DELETE FROM push_subscribers WHERE key=?`),
-  allPush:        db.prepare(`SELECT * FROM push_subscribers`),
-  countPush:      db.prepare(`SELECT COUNT(*) AS n FROM push_subscribers`),
-  // sms_subscribers
-  upsertSms:      db.prepare(`INSERT OR REPLACE INTO sms_subscribers (phone,region,crop,lang,subscribed_at) VALUES (?,?,?,?,?)`),
-  deleteSms:      db.prepare(`DELETE FROM sms_subscribers WHERE phone=?`),
-  allSms:         db.prepare(`SELECT * FROM sms_subscribers`),
-  countSms:       db.prepare(`SELECT COUNT(*) AS n FROM sms_subscribers`),
-  // followups
-  insertFollowup: db.prepare(`INSERT INTO followups (id,diagnosis_id,crop,disease,before_date,after_date,improvement,has_image,created_at) VALUES (?,?,?,?,?,?,?,?,?)`),
+// Centralized SQL (formerly better-sqlite3 prepared statements). libSQL has no
+// persistent prepared-statement objects, so these are plain strings passed to
+// db.execute({ sql, args }) via the dbRun/dbGet/dbAll helpers.
+const SQL = {
+  insertFeedback: `INSERT INTO feedback (crop,disease,accuracy,comment,region,lang,ts) VALUES (?,?,?,?,?,?,?)`,
+  countFeedback:  `SELECT COUNT(*) AS n FROM feedback`,
+  latestFeedback: `SELECT * FROM feedback ORDER BY id DESC LIMIT 200`,
+  insertReport:   `INSERT OR REPLACE INTO disease_reports (id,crop,disease,lat,lon,severity,lang,date,verified,source) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+  recentReports:  `SELECT * FROM disease_reports WHERE date >= ? ORDER BY id DESC`,
+  countReports:   `SELECT COUNT(*) AS n FROM disease_reports`,
+  todayReports:   `SELECT COUNT(*) AS n FROM disease_reports WHERE date = ?`,
+  insertReview:   `INSERT INTO review_requests (id,crop,disease,symptoms,contact,lang,date,status,has_image) VALUES (?,?,?,?,?,?,?,?,?)`,
+  allReviews:     `SELECT * FROM review_requests ORDER BY id DESC`,
+  findReview:     `SELECT * FROM review_requests WHERE id = ?`,
+  verifyReview:   `UPDATE review_requests SET status='verified',verdict=?,notes=?,verified_at=? WHERE id=?`,
+  countVerified:  `SELECT COUNT(*) AS n FROM review_requests WHERE status='verified'`,
+  upsertPush:     `INSERT OR REPLACE INTO push_subscribers (key,subscription,lang,region,crop,created_at) VALUES (?,?,?,?,?,?)`,
+  deletePush:     `DELETE FROM push_subscribers WHERE key=?`,
+  allPush:        `SELECT * FROM push_subscribers`,
+  upsertSms:      `INSERT OR REPLACE INTO sms_subscribers (phone,region,crop,lang,subscribed_at) VALUES (?,?,?,?,?)`,
+  deleteSms:      `DELETE FROM sms_subscribers WHERE phone=?`,
+  allSms:         `SELECT * FROM sms_subscribers`,
+  insertFollowup: `INSERT INTO followups (id,diagnosis_id,crop,disease,before_date,after_date,improvement,has_image,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
 };
 
-// ── In-memory Maps rebuilt from DB at startup ─────────────
-// These are used by the existing push/SMS scheduler logic unchanged.
+// ── In-memory Maps rebuilt from DB at startup (populated in startServer()) ──
+// Used by the existing push/SMS scheduler logic unchanged.
 const pushSubscriptions = new Map();
 const smsSubscribers    = new Map();
 
-for (const row of stmts.allPush.all()) {
-  try { pushSubscriptions.set(row.key, { subscription: JSON.parse(row.subscription), lang: row.lang, region: row.region, crop: row.crop }); }
-  catch(e) {}
-}
-for (const row of stmts.allSms.all()) {
-  smsSubscribers.set(row.phone, { phone: row.phone, region: row.region, crop: row.crop, lang: row.lang });
-}
-
-// JSON file helpers for new features not yet in SQLite schema
+// JSON file helpers for features not yet in SQLite (note: still ephemeral —
+// these write to DATA_DIR (/tmp by default), which Fly wipes on restart).
 const DATA_DIR = process.env.DATA_DIR || '/tmp/sebilai_data';
 const fs_sync  = require('fs');
 if (!fs_sync.existsSync(DATA_DIR)) fs_sync.mkdirSync(DATA_DIR, { recursive: true });
@@ -121,18 +71,17 @@ function saveJSON(name, data) {
   } catch(e) { console.warn('saveJSON failed:', name, e.message); return false; }
 }
 
-// diseaseReports in-memory array for outbreak detection (mirrors SQLite)
-let diseaseReports = (() => {
-  try { return stmts.recentReports.all('2020-01-01').map(r => ({ ...r })); } catch(e) { return []; }
-})();
+// diseaseReports in-memory array for outbreak detection (mirrors Turso;
+// loaded in startServer()).
+let diseaseReports = [];
 
-console.log(`🗄️  SQLite DB: ${DB_PATH}`);
-console.log(`📂 Loaded: ${stmts.countFeedback.get().n} feedback, ${pushSubscriptions.size} push, ${smsSubscribers.size} SMS subscribers`);
-
+const SERVER_BOOT_TS = Date.now();
 const PORT = process.env.PORT || 3000;
 const GROQ_KEY       = process.env.GROQ_API_KEY;
 const GEMINI_KEY     = process.env.GEMINI_API_KEY;
-const OPENROUTER_KEY = process.env.OpenRouter_API_KEY;
+// v13: standard upper-case name (Fly secret). Falls back to the old mixed-case
+// name so the existing Render secret keeps working during cutover.
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || process.env.OpenRouter_API_KEY;
 const GEE_KEY        = process.env.GEE_SERVICE_ACCOUNT_KEY; // JSON string of service account
 
 if (!GROQ_KEY && !GEMINI_KEY && !OPENROUTER_KEY) {
@@ -149,6 +98,31 @@ if (!ADMIN_KEY) {
   console.warn('   All admin endpoints (/api/feedback GET, /api/review-requests, /api/review-verify) will return 503 until it is configured.');
 }
 
+// ── ADDIS AI VOICE PROXY (Amharic / English / Oromo STT + TTS) ──
+// v12: Addis AI is being discontinued (paid product wind-down); their
+// /text-to-speech and /speech-to-text routes return 404 even with a valid
+// key (confirmed via /api/v2/voice/diag: addis_ai_key_present:true,
+// upstream_status:404, "Route not found"). Until a replacement provider
+// is selected, the proxy is disabled and returns a clean 503 with a
+// machine-readable error code so the client can show the v11 toast
+// (no silent failures). English browser-speechSynthesis path is on the
+// client and is NOT affected by this flag.
+const VOICE_PROXY_ENABLED = false;
+const ADDIS_AI_API_KEY = process.env.ADDIS_AI_API_KEY || '';
+if (!ADDIS_AI_API_KEY) {
+  console.warn('⚠️  ADDIS_AI_API_KEY not set. Voice features will return 503.');
+}
+if (!VOICE_PROXY_ENABLED) {
+  console.warn('🔇 VOICE_PROXY_ENABLED=false → /api/v2/voice/{speak,transcribe} will return 503 (provider unavailable). /api/v2/voice/diag still works.');
+}
+const ADDIS_AI_BASE_URL = 'https://api.addisassistant.com/v1';
+
+const multer = require('multer');
+const upload = multer({
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  storage: multer.memoryStorage()
+});
+
 function requireAdminKey(req, res) {
   if (!ADMIN_KEY) {
     res.status(503).json({ error: 'Admin access is disabled: ADMIN_KEY is not configured on this server.' });
@@ -164,6 +138,32 @@ function requireAdminKey(req, res) {
 
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
+
+const DiagnosisSchema = z.object({
+  farmer_id: z.string().optional(),
+  crop_id: z.number().int().positive(),
+  disease_id: z.number().int().positive().optional(),
+  disease_name: z.string().min(2),
+  severity: z.enum(['Low', 'Medium', 'High', 'Very High']),
+  confidence: z.number().min(0).max(1),
+  photo_url: z.string().url().optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+  region: z.string().min(2),
+  notes: z.string().max(1000).optional(),
+  impact_etb: z.number().int().min(0).optional()
+});
+
+const authenticateJWT = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Access token required' });
+  const token = authHeader.split(' ')[1];
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid token' });
+    req.user = user;
+    next();
+  });
+};
 
 // ── SECURITY HEADERS (no helmet dep — manual best-practice headers) ──
 app.use((req, res, next) => {
@@ -223,6 +223,12 @@ function getRiskFromNDVI(ndvi, crop) {
 }
 
 // ── GEE SATELLITE NDVI (via REST API) ────────────────────
+// v12: GEE :computeValue endpoint currently returns 404 with Google's
+// "Route not found" HTML page. The fallback in getSatelliteNDVI()
+// already returns a synthetic NDVI so diagnosis is unaffected. This
+// flag prevents log spam by emitting the failure ONCE per process.
+// TODO: GEE endpoint returns 404 — needs correct API URL, see known-issues
+let _geeBrokenLoggedOnce = false;
 // ── GEE JWT Helper ───────────────────────────────────────
 let _geeToken = null;
 let _geeTokenExpiry = 0;
@@ -341,6 +347,10 @@ async function getSatelliteNDVI(lat, lon, crop) {
       })
     };
 
+    // TODO: GEE endpoint returns 404 — needs correct API URL, see known-issues
+    // The :computeValue REST shape changed at some point in 2024-2025; auth
+    // works, this data call doesn't. Diagnosis flow does not depend on GEE,
+    // so silently fall through to the synthetic-NDVI fallback below.
     const res = await fetch(
       `https://earthengine.googleapis.com/v1/projects/${project}:computeValue`,
       { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
@@ -348,7 +358,10 @@ async function getSatelliteNDVI(lat, lon, crop) {
 
     if (!res.ok) {
       const err = await res.text();
-      console.error('GEE API error:', res.status, err.substring(0, 200));
+      if (!_geeBrokenLoggedOnce) {
+        console.warn('[GEE] :computeValue returned', res.status, '— using synthetic-NDVI fallback for the rest of this process. Body excerpt:', err.substring(0, 200));
+        _geeBrokenLoggedOnce = true;
+      }
       throw new Error('GEE API ' + res.status);
     }
 
@@ -365,8 +378,9 @@ async function getSatelliteNDVI(lat, lon, crop) {
     return { ndvi, risk_level, alert, crop, date: endDate, status: 'success' };
 
   } catch(e) {
-    console.error('GEE error:', e.message);
-    // Graceful fallback: compute risk from weather data instead
+    // v12: silent fallback — the one-time warn above already named the cause.
+    // Per-request `console.error` was spamming Render logs because diagnosis
+    // calls satellite for every analyze() request. Keep the graceful return.
     const fallbackNDVI = parseFloat((0.5 + (lat * 0.003 % 0.15)).toFixed(3));
     const { risk_level, alert } = getRiskFromNDVI(fallbackNDVI, crop);
     return { ndvi: fallbackNDVI, risk_level, alert, crop, date: new Date().toISOString().split('T')[0], status: 'fallback', error: e.message };
@@ -718,23 +732,24 @@ async function sendPushNotification(subscription, payload) {
 }
 
 // Subscribe endpoint
-app.post('/api/push-subscribe', (req, res) => {
+app.post('/api/push-subscribe', async (req, res) => {
   const { subscription, lang, region, crop } = req.body;
   if (!subscription || !subscription.endpoint) return res.status(400).json({ error: 'Invalid subscription' });
   const key = subscription.endpoint.slice(-20);
   pushSubscriptions.set(key, { subscription, lang: lang||'en', region: region||'Addis Ababa', crop: crop||'enset' });
-  stmts.upsertPush.run(key, JSON.stringify(subscription), lang||'en', region||'Addis Ababa', crop||'enset', new Date().toISOString());
+  try { await dbRun(SQL.upsertPush, [key, JSON.stringify(subscription), lang||'en', region||'Addis Ababa', crop||'enset', new Date().toISOString()]); }
+  catch (e) { console.error('push-subscribe db error:', e.message); }
   console.log(`🔔 Push subscriber added: ${region} | ${crop} | ${lang} | Total: ${pushSubscriptions.size}`);
   res.json({ ok: true, total: pushSubscriptions.size });
 });
 
 // Unsubscribe endpoint
-app.post('/api/push-unsubscribe', (req, res) => {
+app.post('/api/push-unsubscribe', async (req, res) => {
   const { endpoint } = req.body;
   if (endpoint) {
     const key = endpoint.slice(-20);
     pushSubscriptions.delete(key);
-    stmts.deletePush.run(key);
+    try { await dbRun(SQL.deletePush, [key]); } catch (e) { console.error('push-unsub db error:', e.message); }
     console.log(`🔕 Push subscriber removed. Total: ${pushSubscriptions.size}`);
   }
   res.json({ ok: true });
@@ -853,23 +868,24 @@ const SMS_ALERT_TEMPLATES = {
 };
 
 // Subscribe farmer phone to SMS alerts
-app.post('/api/sms-subscribe', (req, res) => {
+app.post('/api/sms-subscribe', async (req, res) => {
   const { phone, region, crop, lang } = req.body;
   if (!phone) return res.status(400).json({ error: 'Phone required' });
   const cleanPhone = phone.replace(/\s/g, '').replace(/^0/, '+251');
   smsSubscribers.set(cleanPhone, { phone: cleanPhone, region: region||'Addis Ababa', crop: crop||'enset', lang: lang||'en' });
-  stmts.upsertSms.run(cleanPhone, region||'Addis Ababa', crop||'enset', lang||'en', new Date().toISOString());
+  try { await dbRun(SQL.upsertSms, [cleanPhone, region||'Addis Ababa', crop||'enset', lang||'en', new Date().toISOString()]); }
+  catch (e) { console.error('sms-subscribe db error:', e.message); }
   console.log(`📲 SMS subscriber: ${cleanPhone} | ${crop} | ${region} | ${lang} | Total: ${smsSubscribers.size}`);
   res.json({ ok: true, total: smsSubscribers.size });
 });
 
 // Unsubscribe
-app.post('/api/sms-unsubscribe', (req, res) => {
+app.post('/api/sms-unsubscribe', async (req, res) => {
   const { phone } = req.body;
   if (phone) {
     const clean = phone.replace(/\s/g, '').replace(/^0/, '+251');
     smsSubscribers.delete(clean);
-    stmts.deleteSms.run(clean);
+    try { await dbRun(SQL.deleteSms, [clean]); } catch (e) { console.error('sms-unsub db error:', e.message); }
     console.log(`📵 SMS unsubscribed: ${clean}. Total: ${smsSubscribers.size}`);
   }
   res.json({ ok: true });
@@ -959,36 +975,53 @@ app.post('/api/analyze', async (req, res) => {
 });
 
 // ── FEEDBACK ──────────────────────────────────────────────
-app.post('/api/feedback', (req, res) => {
+app.post('/api/feedback', async (req, res) => {
   const { feedback } = req.body;
   if (!feedback || !Array.isArray(feedback)) return res.status(400).json({ error: 'Invalid' });
-  const insertMany = db.transaction((items) => {
-    for (const f of items) {
-      stmts.insertFeedback.run(f.crop||'', f.disease||'', f.accuracy||'', f.comment||'', f.region||'', f.language||'', new Date().toISOString());
-    }
-  });
-  insertMany(feedback);
-  const total = stmts.countFeedback.get().n;
-  res.json({ ok: true, saved: feedback.length, total });
+  try {
+    // libSQL atomic batch (replaces better-sqlite3 db.transaction)
+    const batch = feedback.map(f => ({
+      sql: SQL.insertFeedback,
+      args: [f.crop||'', f.disease||'', f.accuracy||'', f.comment||'', f.region||'', f.language||'', new Date().toISOString()]
+    }));
+    if (batch.length) await db.batch(batch, 'write');
+    const total = (await dbGet(SQL.countFeedback)).n;
+    res.json({ ok: true, saved: feedback.length, total });
+  } catch (e) {
+    console.error('feedback db error:', e.message);
+    res.status(500).json({ error: 'Failed to save feedback' });
+  }
 });
 
 // Get all feedback (for admin dashboard)
-app.get('/api/feedback', (req, res) => {
+app.get('/api/feedback', async (req, res) => {
   if (!requireAdminKey(req, res)) return;
-  const rows = stmts.latestFeedback.all();
-  res.json({ feedback: rows, total: stmts.countFeedback.get().n });
+  try {
+    const rows = await dbAll(SQL.latestFeedback);
+    res.json({ feedback: rows, total: (await dbGet(SQL.countFeedback)).n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── HEALTH ────────────────────────────────────────────────
-app.post('/api/sync-feedback', (req, res) => {
+app.post('/api/sync-feedback', async (req, res) => {
   // Called by service worker background sync
-  res.json({ ok: true, synced: stmts.countFeedback.get().n });
+  try { res.json({ ok: true, synced: (await dbGet(SQL.countFeedback)).n }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
+  // DB connectivity probe — never throws, surfaces failure in body.
+  // withRetry absorbs a single cold-start "fetch failed" so a freshly-woken
+  // machine doesn't report "degraded" on the first probe.
+  let dbOk = false, dbError = null;
+  try { dbOk = !!(await withRetry(() => dbGet(SQL.countFeedback), 'health db check')); }
+  catch (e) { dbError = e.message; }
   res.json({
-    status: 'ok', version: '3.1',
-    timestamp: new Date().toISOString(),
+    status:     dbOk ? 'ok' : 'degraded',
+    version:    (require('./package.json').version || '3.1'),
+    uptime_seconds: Math.floor((Date.now() - SERVER_BOOT_TS) / 1000),
+    timestamp:  new Date().toISOString(),
+    db:         dbOk ? '✅ ok' : `❌ ${dbError}`,
     groq:       GROQ_KEY       ? '✅' : '❌',
     openrouter: OPENROUTER_KEY ? '✅' : '❌',
     gemini:     GEMINI_KEY     ? '✅' : '❌',
@@ -1000,12 +1033,13 @@ app.get('/api/health', (req, res) => {
 });
 
 // ── COMMUNITY DISEASE REPORTS (for heatmap) ──────────────
-app.post('/api/community-report', (req, res) => {
+app.post('/api/community-report', async (req, res) => {
   const { crop, disease, lat, lon, severity, lang } = req.body;
   if (!crop || !disease || !lat || !lon) return res.status(400).json({ error: 'Missing fields' });
   const id = Date.now();
   const parsedLat = parseFloat(lat), parsedLon = parseFloat(lon);
-  stmts.insertReport.run(id, crop.toLowerCase(), disease, parsedLat, parsedLon, severity||'Medium', lang||'en', new Date().toISOString().split('T')[0], 0, 'app');
+  try { await dbRun(SQL.insertReport, [id, crop.toLowerCase(), disease, parsedLat, parsedLon, severity||'Medium', lang||'en', new Date().toISOString().split('T')[0], 0, 'app']); }
+  catch (e) { console.error('community-report db error:', e.message); return res.status(500).json({ error: 'Failed to save report' }); }
   // Keep in-memory array in sync for outbreak detection
   diseaseReports.push({ id, crop: crop.toLowerCase(), disease, lat: parsedLat, lon: parsedLon, severity: severity||'Medium', date: new Date().toISOString().split('T')[0] });
   if (diseaseReports.length > 1000) diseaseReports = diseaseReports.slice(-1000);
@@ -1015,42 +1049,49 @@ app.post('/api/community-report', (req, res) => {
   res.json({ ok: true, id });
 });
 
-app.get('/api/community-reports', (req, res) => {
+app.get('/api/community-reports', async (req, res) => {
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const recent = stmts.recentReports.all(cutoff).map(r => ({
-    crop: r.crop,
-    disease: r.disease,
-    lat: Math.round(r.lat * 10) / 10,
-    lon: Math.round(r.lon * 10) / 10,
-    severity: r.severity,
-    date: r.date,
-    verified: !!r.verified
-  }));
-  res.json({ reports: recent, total: recent.length });
+  try {
+    const rows = await dbAll(SQL.recentReports, [cutoff]);
+    const recent = rows.map(r => ({
+      crop: r.crop,
+      disease: r.disease,
+      lat: Math.round(r.lat * 10) / 10,
+      lon: Math.round(r.lon * 10) / 10,
+      severity: r.severity,
+      date: r.date,
+      verified: !!r.verified
+    }));
+    res.json({ reports: recent, total: recent.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── AGRONOMIST FLAG / EXPERT REVIEW ──────────────────────
-app.post('/api/flag-review', (req, res) => {
+app.post('/api/flag-review', async (req, res) => {
   const { crop, disease, symptoms, imageBase64, contact, lang } = req.body;
   if (!crop || !disease) return res.status(400).json({ error: 'Missing fields' });
   const id = Date.now();
-  stmts.insertReview.run(id, crop, disease, JSON.stringify(symptoms||[]), contact||'anonymous', lang||'en', new Date().toISOString(), 'pending', imageBase64 ? 1 : 0);
+  try { await dbRun(SQL.insertReview, [id, crop, disease, JSON.stringify(symptoms||[]), contact||'anonymous', lang||'en', new Date().toISOString(), 'pending', imageBase64 ? 1 : 0]); }
+  catch (e) { console.error('flag-review db error:', e.message); return res.status(500).json({ error: 'Failed to save review request' }); }
   console.log(`🔬 Review request: ${disease} on ${crop} from ${contact||'anon'}`);
   res.json({ ok: true, id, message: 'An agronomist will review your case within 48 hours.' });
 });
 
-app.get('/api/review-requests', (req, res) => {
+app.get('/api/review-requests', async (req, res) => {
   if (!requireAdminKey(req, res)) return;
-  res.json({ requests: stmts.allReviews.all() });
+  try { res.json({ requests: await dbAll(SQL.allReviews) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/review-verify', (req, res) => {
+app.post('/api/review-verify', async (req, res) => {
   if (!requireAdminKey(req, res)) return;
   const { id, verdict, notes } = req.body;
-  const r = stmts.findReview.get(id);
-  if (!r) return res.status(404).json({ error: 'Not found' });
-  stmts.verifyReview.run(verdict || '', notes || '', new Date().toISOString(), id);
-  res.json({ ok: true });
+  try {
+    const r = await dbGet(SQL.findReview, [id]);
+    if (!r) return res.status(404).json({ error: 'Not found' });
+    await dbRun(SQL.verifyReview, [verdict || '', notes || '', new Date().toISOString(), id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── SMS INCOMING DIAGNOSIS (Africa's Talking webhook) ─────
@@ -1109,7 +1150,8 @@ app.post('/api/sms/incoming', async (req, res) => {
   await sendSMS(from, reply);
 
   // Log as community report (no GPS from SMS — use Ethiopia centroid)
-  stmts.insertReport.run(Date.now(), crop.toLowerCase(), symptoms, 9.0, 40.0, 'Unknown', 'en', new Date().toISOString().split('T')[0], 0, 'sms');
+  try { await dbRun(SQL.insertReport, [Date.now(), crop.toLowerCase(), symptoms, 9.0, 40.0, 'Unknown', 'en', new Date().toISOString().split('T')[0], 0, 'sms']); }
+  catch (e) { console.error('sms insertReport db error:', e.message); }
 
   res.status(200).send('OK');
 });
@@ -1129,33 +1171,38 @@ app.get('/api/weather', async (req, res) => {
 });
 
 // ── BEFORE/AFTER PHOTO TRACKING ───────────────────────────
-app.post('/api/followup', (req, res) => {
+app.post('/api/followup', async (req, res) => {
   const { diagnosisId, crop, disease, beforeDate, afterDate, imageBase64, improvement } = req.body;
   if (!crop || !disease) return res.status(400).json({ error: 'Missing fields' });
   const id = Date.now();
-  stmts.insertFollowup.run(
-    id, diagnosisId||null, crop, disease,
-    beforeDate || new Date(Date.now() - 7*24*60*60*1000).toISOString().split('T')[0],
-    afterDate  || new Date().toISOString().split('T')[0],
-    improvement||null, imageBase64 ? 1 : 0, new Date().toISOString()
-  );
+  try {
+    await dbRun(SQL.insertFollowup, [
+      id, diagnosisId||null, crop, disease,
+      beforeDate || new Date(Date.now() - 7*24*60*60*1000).toISOString().split('T')[0],
+      afterDate  || new Date().toISOString().split('T')[0],
+      improvement||null, imageBase64 ? 1 : 0, new Date().toISOString()
+    ]);
+  } catch (e) { console.error('followup db error:', e.message); return res.status(500).json({ error: 'Failed to save follow-up' }); }
   console.log(`📸 Follow-up: ${crop} (${disease}) — improvement: ${improvement||'not rated'}`);
   res.json({ ok: true, id });
 });
 
 // ── ENHANCED HEALTH (with live stats) ────────────────────
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
   const today = new Date().toISOString().split('T')[0];
-  const todayCount  = stmts.todayReports.get(today).n;
-  const totalCount  = stmts.countReports.get().n;
-  res.json({
-    diagnosesToday:   todayCount,
-    diagnosesTotal:   Math.max(totalCount, 1247),
-    communityReports: totalCount,
-    verifiedCases:    stmts.countVerified.get().n,
-    smsUsers:         smsSubscribers.size,
-    pushUsers:        pushSubscriptions.size
-  });
+  try {
+    const todayCount  = (await dbGet(SQL.todayReports, [today])).n;
+    const totalCount  = (await dbGet(SQL.countReports)).n;
+    const verified    = (await dbGet(SQL.countVerified)).n;
+    res.json({
+      diagnosesToday:   todayCount,
+      diagnosesTotal:   Math.max(totalCount, 1247),
+      communityReports: totalCount,
+      verifiedCases:    verified,
+      smsUsers:         smsSubscribers.size,
+      pushUsers:        pushSubscriptions.size
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ══════════════════════════════════════════════════════════
@@ -1550,12 +1597,22 @@ app.get('/api/market-price', (req, res) => {
   });
 });
 
+// Resolve a static file by preferring the ROOT copy (the live, actively edited
+// version) and only falling back to the public/ duplicate if root is missing.
+// Earlier code had this reversed, which silently shipped a stale public/ copy
+// to anyone landing on a deep link (~285KB of recent features were invisible).
+function preferRoot(filename) {
+  const rootPath   = path.join(__dirname, filename);
+  const publicPath = path.join(__dirname, 'public', filename);
+  return require('fs').existsSync(rootPath) ? rootPath : publicPath;
+}
+
 // Admin & Agronomist PWA pages + manifests
-app.get('/agronomist', (req, res) => res.sendFile((require('fs').existsSync(path.join(__dirname, 'public', 'agronomist-dashboard.html')) ? path.join(__dirname, 'public', 'agronomist-dashboard.html') : path.join(__dirname, 'agronomist-dashboard.html'))));
-app.get('/admin', (req, res) => res.sendFile((require('fs').existsSync(path.join(__dirname, 'public', 'admin-feedback.html')) ? path.join(__dirname, 'public', 'admin-feedback.html') : path.join(__dirname, 'admin-feedback.html'))));
-app.get('/admin-feedback.html', (req, res) => res.sendFile((require('fs').existsSync(path.join(__dirname, 'public', 'admin-feedback.html')) ? path.join(__dirname, 'public', 'admin-feedback.html') : path.join(__dirname, 'admin-feedback.html'))));
-app.get('/manifest-admin.json', (req, res) => res.sendFile((require('fs').existsSync(path.join(__dirname, 'public', 'manifest-admin.json')) ? path.join(__dirname, 'public', 'manifest-admin.json') : path.join(__dirname, 'manifest-admin.json'))));
-app.get('/manifest-agro.json',  (req, res) => res.sendFile((require('fs').existsSync(path.join(__dirname, 'public', 'manifest-agro.json')) ? path.join(__dirname, 'public', 'manifest-agro.json') : path.join(__dirname, 'manifest-agro.json'))));
+app.get('/agronomist', (req, res) => res.sendFile(preferRoot('agronomist-dashboard.html')));
+app.get('/admin', (req, res) => res.sendFile(preferRoot('admin-feedback.html')));
+app.get('/admin-feedback.html', (req, res) => res.sendFile(preferRoot('admin-feedback.html')));
+app.get('/manifest-admin.json', (req, res) => res.sendFile(preferRoot('manifest-admin.json')));
+app.get('/manifest-agro.json',  (req, res) => res.sendFile(preferRoot('manifest-agro.json')));
 // PWA icons — served as SVG with correct Content-Type
 app.get('/icons/icon-192.png', (req, res) => {
   res.setHeader('Content-Type', 'image/svg+xml');
@@ -1565,15 +1622,405 @@ app.get('/icons/icon-512.png', (req, res) => {
   res.setHeader('Content-Type', 'image/svg+xml');
   res.sendFile((require('fs').existsSync(path.join(__dirname, 'public', 'icon-512.svg')) ? path.join(__dirname, 'public', 'icon-512.svg') : path.join(__dirname, 'icon-512.svg')));
 });
-app.get('/icon-192.svg', (req, res) => res.sendFile((require('fs').existsSync(path.join(__dirname, 'public', 'icon-192.svg')) ? path.join(__dirname, 'public', 'icon-192.svg') : path.join(__dirname, 'icon-192.svg'))));
-app.get('/icon-512.svg', (req, res) => res.sendFile((require('fs').existsSync(path.join(__dirname, 'public', 'icon-512.svg')) ? path.join(__dirname, 'public', 'icon-512.svg') : path.join(__dirname, 'icon-512.svg'))));
+app.get('/icon-192.svg', (req, res) => res.sendFile(preferRoot('icon-192.svg')));
+app.get('/icon-512.svg', (req, res) => res.sendFile(preferRoot('icon-512.svg')));
 
-app.get('*', (req, res) => res.sendFile((require('fs').existsSync(path.join(__dirname, 'public', 'index.html')) ? path.join(__dirname, 'public', 'index.html') : path.join(__dirname, 'index.html'))));
-
-app.listen(PORT, () => {
-  console.log(`\n🌿 SebilAI v3.0`);
-  console.log(`   Groq:       ${GROQ_KEY       ? '✅' : '❌'}`);
-  console.log(`   OpenRouter: ${OPENROUTER_KEY ? '✅' : '❌'}`);
-  console.log(`   Gemini:     ${GEMINI_KEY     ? '✅' : '❌'}`);
-  console.log(`   Satellite:  ${GEE_KEY        ? '✅ GEE' : '🟡 Demo'}\n`);
+// SEO: robots.txt + sitemap.xml. These dramatically help Google index the
+// app and surface it to farmers searching "crop disease ethiopia", etc.
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain').send(
+    'User-agent: *\n' +
+    'Allow: /\n' +
+    'Disallow: /api/\n' +
+    'Disallow: /admin\n' +
+    'Disallow: /agronomist\n' +
+    'Sitemap: https://sebilai.com/sitemap.xml\n'
+  );
 });
+
+app.get('/sitemap.xml', (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  res.type('application/xml').send(
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n' +
+    '  <url>\n' +
+    '    <loc>https://sebilai.com/</loc>\n' +
+    `    <lastmod>${today}</lastmod>\n` +
+    '    <changefreq>weekly</changefreq>\n' +
+    '    <priority>1.0</priority>\n' +
+    '    <xhtml:link rel="alternate" hreflang="en" href="https://sebilai.com/?lang=en"/>\n' +
+    '    <xhtml:link rel="alternate" hreflang="am" href="https://sebilai.com/?lang=am"/>\n' +
+    '    <xhtml:link rel="alternate" hreflang="om" href="https://sebilai.com/?lang=om"/>\n' +
+    '    <xhtml:link rel="alternate" hreflang="ti" href="https://sebilai.com/?lang=ti"/>\n' +
+    '  </url>\n' +
+    '</urlset>\n'
+  );
+});
+
+// ====================== VERSION ENDPOINT ======================
+// (The existing /api/health above was enriched with DB probe + uptime_seconds.)
+app.get('/api/v2/version', (req, res) => {
+  res.json({
+    version: (require('./package.json').version || '0.0.0'),
+    build_time: new Date(SERVER_BOOT_TS).toISOString(),
+    uptime_seconds: Math.floor((Date.now() - SERVER_BOOT_TS) / 1000)
+  });
+});
+
+// ====================== AUTH ROUTES ======================
+// First user automatically becomes admin. After that, only admins can create users.
+app.post('/api/v2/auth/register', async (req, res) => {
+  try {
+    const { username, password, role } = req.body;
+    if (!username || !password || password.length < 8) {
+      return res.status(400).json({ error: 'Username and password (min 8 chars) required' });
+    }
+    const countRow = await dbGet("SELECT COUNT(*) as count FROM users");
+    const isFirstUser = Number(countRow.count) === 0;
+    const userRole = isFirstUser ? 'admin' : (role || 'agronomist');
+    if (!isFirstUser) {
+      const authHeader = req.headers.authorization;
+      if (!authHeader) return res.status(401).json({ error: 'Only admins can create new users' });
+      try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded.role !== 'admin') {
+          return res.status(403).json({ error: 'Only admins can create new users' });
+        }
+      } catch (e) {
+        return res.status(403).json({ error: 'Invalid admin token' });
+      }
+    }
+    const hashed = await bcrypt.hash(password, 10);
+    try {
+      const r = await dbRun("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", [username, hashed, userRole]);
+      res.status(201).json({
+        success: true,
+        user_id: r.lastInsertRowid != null ? Number(r.lastInsertRowid) : undefined,
+        role: userRole,
+        message: isFirstUser ? 'First admin user created!' : 'User created'
+      });
+    } catch (e) {
+      if ((e.message || '').includes('UNIQUE')) return res.status(409).json({ error: 'Username already exists' });
+      return res.status(500).json({ error: e.message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/v2/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
+  try {
+    const user = await dbGet("SELECT * FROM users WHERE username = ?", [username]);
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    res.json({ success: true, token, role: user.role, username: user.username });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ====================== CROPS & DISEASES (DB-backed) ======================
+app.get('/api/v2/crops', async (req, res) => {
+  try { res.json(await dbAll("SELECT * FROM crops ORDER BY name")); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/v2/crops/:cropId/diseases', async (req, res) => {
+  try { res.json(await dbAll("SELECT * FROM diseases WHERE crop_id = ?", [req.params.cropId])); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ====================== STATS ======================
+app.get('/api/v2/stats', async (req, res) => {
+  try {
+    const row = await dbGet("SELECT * FROM stats_cache WHERE id = 1");
+    res.json(row || { total_diagnoses: 0, total_impact_etb: 0 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ====================== DIAGNOSES ======================
+app.post('/api/v2/diagnoses', async (req, res) => {
+  const result = DiagnosisSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: 'Validation failed', details: result.error.errors });
+  }
+  const d = result.data;
+  try {
+    const r = await dbRun(`
+      INSERT INTO diagnoses
+      (farmer_id, crop_id, disease_id, disease_name, severity, confidence,
+       photo_url, latitude, longitude, region, notes, impact_etb)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      d.farmer_id || 'anonymous', d.crop_id, d.disease_id || null, d.disease_name,
+      d.severity, d.confidence, d.photo_url || null, d.latitude || null,
+      d.longitude || null, d.region, d.notes || null, d.impact_etb || 0
+    ]);
+    await dbRun(`UPDATE stats_cache SET total_diagnoses = total_diagnoses + 1,
+            total_impact_etb = total_impact_etb + ?, last_updated = CURRENT_TIMESTAMP`,
+           [d.impact_etb || 0]);
+    res.json({ success: true, diagnosis_id: r.lastInsertRowid != null ? Number(r.lastInsertRowid) : undefined });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin-only: full diagnosis list
+app.get('/api/v2/diagnoses', authenticateJWT, async (req, res) => {
+  try { res.json(await dbAll("SELECT * FROM diagnoses ORDER BY created_at DESC LIMIT 100")); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ====================== OUTBREAK MAP (with privacy rounding) ======================
+// Latitude/longitude rounded to 2 decimals (~1km precision) for farmer privacy.
+app.get('/api/v2/outbreaks/map', async (req, res) => {
+  try {
+    const rows = await dbAll(`
+      SELECT region,
+             ROUND(latitude, 2) as latitude,
+             ROUND(longitude, 2) as longitude,
+             disease_name,
+             COUNT(*) as report_count
+      FROM diagnoses
+      WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+      GROUP BY disease_name, region, ROUND(latitude, 2), ROUND(longitude, 2)
+      HAVING report_count >= 3
+    `);
+    res.json({
+      type: "FeatureCollection",
+      features: rows.map(r => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [r.longitude, r.latitude] },
+        properties: {
+          disease: r.disease_name,
+          region: r.region,
+          reports: r.report_count,
+          risk: r.report_count > 10 ? "High" : "Medium"
+        }
+      }))
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ====================== VOICE: SPEECH-TO-TEXT (Addis AI proxy) ======================
+app.post('/api/v2/voice/transcribe', upload.single('audio'), async (req, res) => {
+  // v12: gated off until a replacement STT provider is selected.
+  if (!VOICE_PROXY_ENABLED) {
+    return res.status(503).json({
+      error: 'voice_proxy_disabled',
+      message: 'Voice transcription is temporarily unavailable while we transition providers.',
+      lang: req.body && req.body.language
+    });
+  }
+  if (!ADDIS_AI_API_KEY) {
+    return res.status(503).json({ error: 'Voice service not configured' });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: 'No audio file provided' });
+  }
+  const language = req.body.language || 'am-ET';
+  const supported = ['am-ET', 'en-US', 'om-ET'];
+  if (!supported.includes(language)) {
+    return res.status(400).json({ error: 'Language not supported for voice yet', language });
+  }
+
+  try {
+    const formData = new FormData();
+    const blob = new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/webm' });
+    formData.append('file', blob, 'audio.webm');
+    formData.append('language', language);
+
+    const r = await fetch(`${ADDIS_AI_BASE_URL}/speech-to-text`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ADDIS_AI_API_KEY}` },
+      body: formData
+    });
+
+    if (!r.ok) {
+      const errText = await r.text();
+      console.error('[AddisAI STT error]', r.status, errText);
+      return res.status(502).json({ error: 'Addis AI transcription failed', status: r.status });
+    }
+    const data = await r.json();
+    res.json({ transcript: data.transcript || '', language });
+  } catch (err) {
+    console.error('[STT route error]', err);
+    res.status(500).json({ error: 'Transcription failed', detail: err.message });
+  }
+});
+
+// ====================== VOICE: TEXT-TO-SPEECH (Addis AI proxy) ======================
+app.post('/api/v2/voice/speak', express.json(), async (req, res) => {
+  // v11: instrumented + informative error payloads. Every non-200 path now
+  // returns a JSON shape the client can read to surface the real reason
+  // (instead of silently falling back to browser TTS that has no am/om voice).
+  console.log('[TTS] request received. ADDIS_AI_API_KEY set?', !!ADDIS_AI_API_KEY, 'lang=', (req.body && req.body.language));
+
+  // v12: gated off until a replacement TTS provider is selected.
+  // Addis AI returns 404 "Route not found" even with a valid key — the
+  // service is winding down. Return a clean 503 so the client's v11
+  // toast surfaces the "voice unavailable" message instead of trying
+  // and failing silently.
+  if (!VOICE_PROXY_ENABLED) {
+    return res.status(503).json({
+      error: 'voice_proxy_disabled',
+      message: 'Voice playback is temporarily unavailable while we transition providers.',
+      lang: req.body && req.body.language
+    });
+  }
+  if (!ADDIS_AI_API_KEY) {
+    return res.status(503).json({
+      error: 'voice_not_configured',
+      message: 'ADDIS_AI_API_KEY env var is missing on the server',
+      lang: req.body && req.body.language
+    });
+  }
+  const { text, language } = req.body || {};
+  if (!text || typeof text !== 'string' || text.length > 2000) {
+    return res.status(400).json({ error: 'bad_request', message: 'Text must be a string under 2000 chars', lang: language });
+  }
+  const lang = language || 'am-ET';
+  const supported = ['am-ET', 'en-US', 'om-ET'];
+  if (!supported.includes(lang)) {
+    return res.status(400).json({ error: 'language_not_supported', message: 'Language not supported for voice yet', lang });
+  }
+
+  try {
+    const r = await fetch(`${ADDIS_AI_BASE_URL}/text-to-speech`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${ADDIS_AI_API_KEY}`
+      },
+      body: JSON.stringify({ text, language: lang, speed: 1.0 })
+    });
+
+    if (!r.ok) {
+      const errText = await r.text();
+      const excerpt = (errText || '').slice(0, 400);
+      console.error('[AddisAI TTS error] status=', r.status, 'body=', excerpt);
+      return res.status(502).json({
+        error: 'addis_ai_upstream_failed',
+        upstream_status: r.status,
+        upstream_body_excerpt: excerpt,
+        lang
+      });
+    }
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    const buf = Buffer.from(await r.arrayBuffer());
+    console.log('[TTS] success, bytes=', buf.length, 'lang=', lang);
+    res.send(buf);
+  } catch (err) {
+    console.error('[TTS route network error]', err && err.message);
+    res.status(502).json({
+      error: 'addis_ai_network_failed',
+      detail: err && err.message,
+      lang
+    });
+  }
+});
+
+// v11: read-only diagnostic endpoint. Lets ops + the user verify from any
+// browser whether the Addis AI key is configured on the server AND whether
+// the upstream API is reachable + responding. Never returns the key itself —
+// only the last 4 chars as a sanity tail.
+app.get('/api/v2/voice/diag', async (req, res) => {
+  const hasKey = !!ADDIS_AI_API_KEY;
+  const keyTail = hasKey ? ('...' + String(ADDIS_AI_API_KEY).slice(-4)) : null;
+  let upstreamReachable = null;
+  let upstreamStatus = null;
+  let upstreamBodyExcerpt = null;
+  try {
+    if (hasKey) {
+      const r = await fetch(`${ADDIS_AI_BASE_URL}/text-to-speech`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ADDIS_AI_API_KEY}`
+        },
+        body: JSON.stringify({ text: 'ሰላም', language: 'am-ET', speed: 1.0 })
+      });
+      upstreamReachable = true;
+      upstreamStatus = r.status;
+      if (!r.ok) {
+        const txt = await r.text();
+        upstreamBodyExcerpt = txt.slice(0, 400);
+      } else {
+        upstreamBodyExcerpt = 'OK (audio bytes returned, not shown)';
+      }
+    }
+  } catch (err) {
+    upstreamReachable = false;
+    upstreamBodyExcerpt = err && err.message;
+  }
+  res.json({
+    addis_ai_key_present: hasKey,
+    addis_ai_key_tail: keyTail,
+    addis_ai_base_url: ADDIS_AI_BASE_URL,
+    upstream_reachable: upstreamReachable,
+    upstream_status: upstreamStatus,
+    upstream_body_excerpt: upstreamBodyExcerpt,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Lightweight health check for Fly + UptimeRobot (no DB hit — always cheap).
+app.get('/health', (_req, res) => res.status(200).json({ ok: true }));
+
+app.get('*', (req, res) => res.sendFile(preferRoot('index.html')));
+
+// ── ASYNC STARTUP ──────────────────────────────────────────
+// libSQL is async, so schema creation + the in-memory rebuilds that used to
+// run synchronously at module load now happen here, before we accept traffic.
+async function startServer() {
+  try {
+    await initSchema();
+    console.log('🗄️  Turso/libSQL schema ready');
+  } catch (e) {
+    console.error('❌ DB schema init failed:', e.message);
+  }
+
+  // Rebuild push/SMS Maps + the diseaseReports array from the database.
+  // Wrapped in withRetry so a cold-start "fetch failed" doesn't lose the data;
+  // if it still fails we keep running (Maps just start empty and refill on use).
+  try {
+    await withRetry(async () => {
+      pushSubscriptions.clear();
+      for (const row of await dbAll(SQL.allPush)) {
+        try { pushSubscriptions.set(row.key, { subscription: JSON.parse(row.subscription), lang: row.lang, region: row.region, crop: row.crop }); } catch(e) {}
+      }
+      smsSubscribers.clear();
+      for (const row of await dbAll(SQL.allSms)) {
+        smsSubscribers.set(row.phone, { phone: row.phone, region: row.region, crop: row.crop, lang: row.lang });
+      }
+      diseaseReports = (await dbAll(SQL.recentReports, ['2020-01-01'])).map(r => ({ ...r }));
+    }, 'startup data load');
+    const fb = (await withRetry(() => dbGet(SQL.countFeedback), 'startup feedback count')).n;
+    console.log(`📂 Loaded: ${fb} feedback, ${pushSubscriptions.size} push, ${smsSubscribers.size} SMS subscribers`);
+  } catch (e) {
+    console.error('⚠️  Startup data load failed after retries (continuing, will refill on demand):', e.message);
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n🌿 SebilAI v3.0  ·  listening on 0.0.0.0:${PORT}`);
+    console.log(`   Groq:       ${GROQ_KEY       ? '✅' : '❌'}`);
+    console.log(`   OpenRouter: ${OPENROUTER_KEY ? '✅' : '❌'}`);
+    console.log(`   Gemini:     ${GEMINI_KEY     ? '✅' : '❌'}`);
+    console.log(`   Satellite:  ${GEE_KEY        ? '✅ GEE' : '🟡 Demo'}`);
+    console.log(`   Database:   ${process.env.TURSO_DATABASE_URL ? '✅ Turso (libSQL)' : '🟡 local file:sebilai.db'}\n`);
+  });
+}
+
+startServer();

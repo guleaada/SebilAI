@@ -18,7 +18,7 @@
 
 <br>
 
-**Developer:** Gulilat Kasiye Worku (ጉልላት ካስዬ ዎርቁ)<br>
+**Developer:** Gulilat Kasiye Worku<br>
 gulilatkasiye4@gmail.com · +251 704 161 402<br>
 [github.com/guleaada](https://github.com/guleaada) · [sebilai.com](https://sebilai.com)
 
@@ -306,11 +306,20 @@ If you would like to partner — review, validate, or pilot SebilAI — please r
 
 ---
 
-## ⚖️ License
+## License
 
-**CC BY-NC-ND 4.0** — View and study ✅ | Commercial use ❌ | Derivatives ❌
+SebilAI is released under a custom **Source-Available License** — see the
+[LICENSE](./LICENSE) file for full terms.
 
-**Original creator:** Gulilat Kasiye Worku (ጉልላት ካስዬ ዎርቁ) — All rights reserved.
+**In short:**
+- ✅ View the code for personal learning
+- ✅ Cite in academic research (with attribution)
+- ❌ No copying, modification, or redistribution
+- ❌ No commercial use
+- ❌ No AI/ML training on this code
+- 📧 For commercial licensing: gulilatkasiye4@gmail.com
+
+**Original creator:** Gulilat Kasiye Worku — All rights reserved.
 
 ---
 
@@ -318,7 +327,7 @@ If you would like to partner — review, validate, or pilot SebilAI — please r
 
 **Built for Ethiopia 🇪🇹 — With Purpose 🌍**
 
-**Gulilat Kasiye Worku (ጉልላት ካስዬ ዎርቁ)**<br>
+**Gulilat Kasiye Worku**<br>
 [GitHub](https://github.com/guleaada) · [LinkedIn](https://linkedin.com/in/gulilat-k-worku-63a02520a) · [sebilai.com](https://sebilai.com)
 
 *"Empowering those who feed the nation."*

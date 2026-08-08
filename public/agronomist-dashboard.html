@@ -163,14 +163,14 @@ input:focus, select:focus, textarea:focus { border-color: #2D6A0A; }
     <div class="panel">
       <h3>🗺️ Community Disease Reports — Ethiopia</h3>
       <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
-        <select id="map-filter-crop" onchange="refreshMap()" style="width:auto;margin-bottom:0;">
+        <select id="map-filter-crop" onchange="refreshMap()" style="width:auto;margin-bottom:0;" aria-label="Filter map by crop">
           <option value="">All Crops</option>
           <option value="enset">Enset</option><option value="teff">Teff</option>
           <option value="wheat">Wheat</option><option value="maize">Maize</option>
           <option value="coffee">Coffee</option><option value="potato">Potato</option>
           <option value="barley">Barley</option><option value="sorghum">Sorghum</option>
         </select>
-        <select id="map-filter-severity" onchange="refreshMap()" style="width:auto;margin-bottom:0;">
+        <select id="map-filter-severity" onchange="refreshMap()" style="width:auto;margin-bottom:0;" aria-label="Filter map by severity">
           <option value="">All Severity</option>
           <option value="High">High</option><option value="Medium">Medium</option><option value="Low">Low</option>
         </select>
@@ -185,7 +185,7 @@ input:focus, select:focus, textarea:focus { border-color: #2D6A0A; }
     <div class="panel">
       <h3>🔮 14-Day Disease Forecast by Region</h3>
       <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
-        <select id="fc-crop" style="width:auto;margin-bottom:0;">
+        <select id="fc-crop" style="width:auto;margin-bottom:0;" aria-label="Forecast crop">
           <option value="teff">Teff</option><option value="wheat">Wheat</option>
           <option value="maize">Maize</option><option value="coffee">Coffee</option>
           <option value="enset">Enset</option><option value="potato">Potato</option>

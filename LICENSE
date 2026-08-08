@@ -1,13 +1,139 @@
-MIT License
-
+SebilAI Source-Available License
+Version 1.0, May 2026
 Copyright (c) 2026 Gulilat Kasiye Worku
+All Rights Reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software to use, copy, modify, and distribute it, subject to the
-following conditions:
+────────────────────────────────────────────────────────────────────────
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the software.
+1. DEFINITIONS
 
-The author (Gulilat Kasiye Worku) must be credited as the original creator
-of Resilience Guardian in any derivative work or publication.
+"The Software" means the SebilAI source code, documentation, assets, and
+associated files contained in this repository.
+
+"The Author" means Gulilat Kasiye Worku, the original creator and
+copyright holder of the Software.
+
+"You" or "Licensee" means any individual or entity exercising rights
+under this License.
+
+────────────────────────────────────────────────────────────────────────
+
+2. GRANT OF LIMITED RIGHTS
+
+Subject to the terms and conditions of this License, the Author grants
+You a worldwide, non-exclusive, royalty-free, revocable license to:
+
+  (a) View and inspect the source code of the Software;
+  (b) Use the Software for personal, non-commercial learning;
+  (c) Use the Software in academic research, provided that:
+      - the use is non-commercial;
+      - the Author and "SebilAI (sebilai.com)" are properly cited in
+        any resulting publication, thesis, or presentation;
+      - no modified or redistributed copies are made beyond what is
+        strictly necessary for the research itself.
+
+────────────────────────────────────────────────────────────────────────
+
+3. EXPRESSLY PROHIBITED USES
+
+Without prior written permission from the Author, the following are
+strictly prohibited:
+
+  3.1  Copying, reproducing, or duplicating any portion of the Software
+       for purposes other than those permitted in Section 2.
+
+  3.2  Modifying, adapting, translating, porting, or creating derivative
+       works based on the Software in whole or in part.
+
+  3.3  Distributing, sublicensing, sharing, publishing, mirroring, or
+       otherwise making the Software available to any third party,
+       whether publicly or privately, in source or compiled form.
+
+  3.4  Using the Software, or any part of it, for any commercial
+       purpose, including but not limited to selling, licensing,
+       offering as a hosted service, consulting based on its code, or
+       integrating it into a commercial product.
+
+  3.5  Removing, altering, or obscuring the copyright notice, license
+       terms, authorship attribution, or any branding identifying the
+       Software as SebilAI.
+
+  3.6  Training, fine-tuning, or otherwise incorporating the Software's
+       source code, data, documentation, or assets into any machine
+       learning model, large language model, AI dataset, or automated
+       code-generation system.
+
+  3.7  Reverse-engineering for the purpose of producing a competing
+       product or replicating the functionality of the Software.
+
+────────────────────────────────────────────────────────────────────────
+
+4. ATTRIBUTION REQUIREMENT
+
+Any use permitted under Section 2 must include the following attribution
+in a clearly visible location (in the case of research, in the
+publication itself; in the case of personal learning, in any notes,
+write-ups, or derivative learning materials):
+
+    "SebilAI © 2026 Gulilat Kasiye Worku — https://sebilai.com"
+
+────────────────────────────────────────────────────────────────────────
+
+5. CONTACT AND COMMERCIAL LICENSING
+
+For any use beyond the scope of this License — including but not limited
+to commercial use, redistribution rights, partnership integrations,
+modification rights, or institutional deployment — please contact the
+Author to negotiate a separate written agreement:
+
+    Gulilat Kasiye Worku
+    Email:    gulilatkasiye4@gmail.com
+    Website:  https://sebilai.com
+    GitHub:   https://github.com/guleaada/SebilAI
+
+────────────────────────────────────────────────────────────────────────
+
+6. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NON-INFRINGEMENT. THE AUTHOR MAKES NO REPRESENTATIONS REGARDING THE
+ACCURACY, RELIABILITY, OR SUITABILITY OF THE SOFTWARE FOR ANY PURPOSE,
+INCLUDING ITS USE IN AGRICULTURAL DECISION-MAKING. USERS RELY ON THE
+SOFTWARE AT THEIR OWN RISK.
+
+────────────────────────────────────────────────────────────────────────
+
+7. LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING BUT
+NOT LIMITED TO LOSS OF CROPS, LOSS OF REVENUE, LOSS OF DATA, BUSINESS
+INTERRUPTION, OR PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES) ARISING IN
+ANY WAY OUT OF THE USE OR INABILITY TO USE THE SOFTWARE, EVEN IF ADVISED
+OF THE POSSIBILITY OF SUCH DAMAGE.
+
+────────────────────────────────────────────────────────────────────────
+
+8. TERMINATION
+
+Any breach of this License automatically and immediately terminates
+Your rights under it. Upon termination, You must cease all use of the
+Software and destroy any copies You possess. Sections 3 (Prohibited
+Uses), 6 (No Warranty), and 7 (Limitation of Liability) survive
+termination.
+
+────────────────────────────────────────────────────────────────────────
+
+9. GOVERNING LAW
+
+This License shall be governed by and construed in accordance with the
+laws of the Federal Democratic Republic of Ethiopia, without regard to
+its conflict of law provisions. Any disputes arising from this License
+shall be subject to the exclusive jurisdiction of the courts of
+Ethiopia.
+
+────────────────────────────────────────────────────────────────────────
+
+END OF LICENSE

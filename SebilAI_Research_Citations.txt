@@ -44,128 +44,128 @@ App: sebilai.com
 2. Chiro NSRTC / EIAR (2020). Sorghum Disease and Pest Management. Chiro NSRTC.
 
 ============================================================
-Developed by Gulilat Kasiye Worku (ጉልላት ካስዬ ዎርቁ)
-© 2026 All rights reserved. CC BY-NC-ND 4.0
+Developed by Gulilat Kasiye Worku
+© 2026 All rights reserved. Source-Available License — see LICENSE
 ═══════════════════════════════════════════════════════════════
 NOUG (NIGERSEED / GUIZOTIA ABYSSINICA) — 8 ETHIOPIAN PAPERS
 ═══════════════════════════════════════════════════════════════
 
 24. Dagnachew Yirgou (1964). "Some diseases of Guizotia abyssinica
-    in Ethiopia." Plant Disease Reporter 48: 672. [FOUNDATIONAL]
+ in Ethiopia." Plant Disease Reporter 48: 672. [FOUNDATIONAL]
 
 25. EIAR / Ambo Plant Protection Research Center (2009).
-    "Review of Research on Diseases of Oil Crops in Ethiopia."
-    Ethiopian Institute of Agricultural Research.
+ "Review of Research on Diseases of Oil Crops in Ethiopia."
+ Ethiopian Institute of Agricultural Research.
 
 26. Yitbarek & Truwork (1992). Niger Stem & Leaf Blight studies.
-    Holetta Agricultural Research Center (HARC), EIAR.
+ Holetta Agricultural Research Center (HARC), EIAR.
 
 27. Holetta Agricultural Research Center / EIAR (2010).
-    "Crop Management Practices in Noug (Guizotia abyssinica)
-    in the Central Highlands of Ethiopia." Oil Crops Workshop.
+ "Crop Management Practices in Noug (Guizotia abyssinica)
+ in the Central Highlands of Ethiopia." Oil Crops Workshop.
 
 28. Ethiopian Institute of Agricultural Research [EIAR] (2017).
-    "Oilseed Crops Strategy 2016-2023." Addis Ababa: EIAR.
+ "Oilseed Crops Strategy 2016-2023." Addis Ababa: EIAR.
 
 29. Dempewolf H., Tesfaye M., Teshome A. et al. (2015).
-    "Patterns of domestication in the Ethiopian oil-seed crop
-    noug (Guizotia abyssinica)." Evolutionary Applications 8:
-    464–475. DOI: 10.1111/eva.12256
+ "Patterns of domestication in the Ethiopian oil-seed crop
+ noug (Guizotia abyssinica)." Evolutionary Applications 8:
+ 464–475. DOI: 10.1111/eva.12256
 
 30. Geleta M. & Ortiz R. (2022). "Analysis of genetic diversity
-    and population structure of oilseed crop noug (Guizotia
-    abyssinica) accessions collected from Ethiopia."
-    Molecular Biology Reports. DOI: 10.1007/s11033-022-08005-9
+ and population structure of oilseed crop noug (Guizotia
+ abyssinica) accessions collected from Ethiopia."
+ Molecular Biology Reports. DOI: 10.1007/s11033-022-08005-9
 
 31. Tsehay S., Ortiz R., Geleta M., Bekele E., Tesfaye K.,
-    Johansson E. (2021). "Nutritional Profile of the Ethiopian
-    Oilseed Crop Noug (Guizotia abyssinica Cass.): Opportunities
-    for Its Improvement as a Source for Human Nutrition."
-    Foods 10: 1778. DOI: 10.3390/foods10081778
+ Johansson E. (2021). "Nutritional Profile of the Ethiopian
+ Oilseed Crop Noug (Guizotia abyssinica Cass.): Opportunities
+ for Its Improvement as a Source for Human Nutrition."
+ Foods 10: 1778. DOI: 10.3390/foods10081778
 
 CROP CONTEXT:
 - Noug is INDIGENOUS to Ethiopia (center of origin)
 - Domesticated before 3000 BC in Ethiopian highlands
 - Ethiopia produces ~50% of world's Noug
 - ~285,236 hectares cultivated in Ethiopia (40% of total oil
-  crop area), ~159,820 tonnes/year (26% of total oilseed
-  production)
+ crop area), ~159,820 tonnes/year (26% of total oilseed
+ production)
 - Grown in highlands 1600-2200 masl: Amhara, Oromia, SNNPR,
-  Tigray
+ Tigray
 - Oil content 30-50%
 - Three traditional Ethiopian varieties:
-  • 'abat noug' (highland, long-season, June-December)
-  • 'mesno noug' (short-season, waterlogged soils)
-  • 'bunegne noug' (lowland)
+ • 'abat noug' (highland, long-season, June-December)
+ • 'mesno noug' (short-season, waterlogged soils)
+ • 'bunegne noug' (lowland)
 
 KEY DISEASES (per Ethiopian research):
 - Alternaria Leaf Spot (Alternaria alternata) — most common
 - Cercospora Leaf Spot (Cercospora guizoticola)
 - Alternaria Stem & Leaf Blight — devastating for
-  early-maturing accessions in wet seasons
+ early-maturing accessions in wet seasons
 - Root Rot (Macrophomina phaseolina)
 - Bacterial Blight (Pseudomonas spp.)
 - Sclerotinia Wilt
 
 KEY PEST:
 - Niger Leaf Miner (Sphaeroderma guizotiae Selman) —
-  indigenous Ethiopian pest, northwestern Ethiopia
+ indigenous Ethiopian pest, northwestern Ethiopia
 
 ═══════════════════════════════════════════════════════════════
 TOMATO (TIMAATIMII / ቲማቲም) — 6 ETHIOPIAN PAPERS
 ═══════════════════════════════════════════════════════════════
 
 32. Yitayih Gedefaw et al. (2024). "Identification and Management
-    of Major Diseases and Arthropod Pests of Tomato in Ethiopia:
-    A Technical Manual." Ethiopian Institute of Agricultural
-    Research, Melkassa Agricultural Research Center.
-    [FOUNDATIONAL — Most comprehensive Ethiopian tomato reference]
+ of Major Diseases and Arthropod Pests of Tomato in Ethiopia:
+ A Technical Manual." Ethiopian Institute of Agricultural
+ Research, Melkassa Agricultural Research Center.
+ [FOUNDATIONAL — Most comprehensive Ethiopian tomato reference]
 
 33. Jabamo T., Ayalew G., Goftishu M., Wakgari M. (2023).
-    "Integrated Effect of Insecticide and Sex Pheromone on the
-    Tomato Leafminer, Tuta Absoluta (Lepidoptera: Gelechiidae)."
-    Crop Protection. EIAR Melkassa Agricultural Research Center,
-    Central Rift Valley, Ethiopia. Two-season trial 2020-2021.
-    Integrated approach reduced larval populations >83%.
-    DOI: 10.2139/ssrn.4225281
+ "Integrated Effect of Insecticide and Sex Pheromone on the
+ Tomato Leafminer, Tuta Absoluta (Lepidoptera: Gelechiidae)."
+ Crop Protection. EIAR Melkassa Agricultural Research Center,
+ Central Rift Valley, Ethiopia. Two-season trial 2020-2021.
+ Integrated approach reduced larval populations >83%.
+ DOI: 10.2139/ssrn.4225281
 
 34. Hawassa Agricultural Research Center / SARI (2017).
-    "Integrated Management of Tomato Late Blight Through Host
-    Plant Resistance and Reduced Frequency of Fungicide in
-    Arbaminch Areas, Southern Ethiopia."
-    Documents yield losses 63.7-100% from Late Blight.
+ "Integrated Management of Tomato Late Blight Through Host
+ Plant Resistance and Reduced Frequency of Fungicide in
+ Arbaminch Areas, Southern Ethiopia."
+ Documents yield losses 63.7-100% from Late Blight.
 
 35. Melese Lema & Bililign Mekonnen (2026). "Efficacy of Copper
-    Plus WP against Tomato Late Blight, Early Blight, Bacterial
-    Spot, and Powdery Mildew at Arba Minch and Mihirab Abaya in
-    Southern Region, Ethiopia." Asian Journal of Research and
-    Review in Agriculture 8(1):33-43. Hawasa ARC, SIARI.
+ Plus WP against Tomato Late Blight, Early Blight, Bacterial
+ Spot, and Powdery Mildew at Arba Minch and Mihirab Abaya in
+ Southern Region, Ethiopia." Asian Journal of Research and
+ Review in Agriculture 8(1):33-43. Hawasa ARC, SIARI.
 
 36. Berihun B., Demissie A., Felatie H., Tesema A., Wodajo B.,
-    Shiferaw W., Hailu S. (2026). "Evaluation of Pseudomonas
-    fluorescens for biocontrol of early blight (Alternaria solani)
-    in tomato in North Wollo, Ethiopia." PLoS ONE.
-    DOI: 10.1371/journal.pone.0341442
-    Woldia University / University of Gondar.
-    Indigenous Pfsa31 isolate matched chemical efficacy.
+ Shiferaw W., Hailu S. (2026). "Evaluation of Pseudomonas
+ fluorescens for biocontrol of early blight (Alternaria solani)
+ in tomato in North Wollo, Ethiopia." PLoS ONE.
+ DOI: 10.1371/journal.pone.0341442
+ Woldia University / University of Gondar.
+ Indigenous Pfsa31 isolate matched chemical efficacy.
 
 37. Lemma Desalegn (2002). "Tomatoes: Research Experiences and
-    Production Prospects." Research Report 43, EIAR, Addis Ababa.
-    [FOUNDATIONAL — baseline Ethiopian tomato reference]
+ Production Prospects." Research Report 43, EIAR, Addis Ababa.
+ [FOUNDATIONAL — baseline Ethiopian tomato reference]
 
 CROP CONTEXT:
 - Major Ethiopian vegetable cash crop
 - ~9,768 ha annually, ~913,000 tonnes
 - Main production: Central Rift Valley (Adama, Meki, Ziway)
 - Melkassa ARC (8°24'N, 39°21'E, 1550 m.a.s.l.) is national
-  tomato research authority
+ tomato research authority
 - Optimal: 21-24°C, well-drained soil
 - Resistant varieties: Melkashola, Melkasalsa, Bisholla,
-  Sirinka-1, Gelilema, ARP tomato d2, Roma VF
+ Sirinka-1, Gelilema, ARP tomato d2, Roma VF
 
 KEY DISEASES (per EIAR Melkassa 2024 Technical Manual):
 1. Tuta absoluta (Tomato Leafminer) — invasive since 2012,
-   80-100% loss potential. PRIORITY #1.
+ 80-100% loss potential. PRIORITY #1.
 2. Late Blight (Phytophthora infestans) — 63.7-100% loss
 3. Early Blight (Alternaria solani)
 4. Bacterial Wilt (Ralstonia solanacearum)
@@ -183,11 +183,11 @@ KEY PESTS:
 
 KEY MANAGEMENT:
 - Tuta absoluta: Spinosad (Tracer 480 SC, 150 ml/ha)
-  + pheromone mass trapping; earthing-up 2-3 times
+ + pheromone mass trapping; earthing-up 2-3 times
 - Late Blight: Ridomil MZ Gold + resistant varieties
 - Early Blight: Pseudomonas fluorescens Pfsa31 biocontrol
 - General: Mancozeb, Copper Plus WP, crop rotation,
-  staking, mulching, resistant varieties from EIAR
+ staking, mulching, resistant varieties from EIAR
 
 
 ═══════════════════════════════════════════════════════════════
@@ -195,65 +195,65 @@ ONION (SHUNKURTII / ሽንኩርት) — 5 ETHIOPIAN PAPERS
 ═══════════════════════════════════════════════════════════════
 
 38. Genet A. & Yalew D. (2022). "Demonstration of Recommended
-    Fungicides against Onion Purple Blotch Disease in Fogera
-    Plains, Ethiopia." Journal of Plant Biology & Crop Research
-    5(1): 1046. Bahir Dar University / Amhara Regional Research.
-    Dera, Fogera, Libo Kemkem districts. Tebuconazole +
-    Difenoconazole 2-3 sprays optimal.
+ Fungicides against Onion Purple Blotch Disease in Fogera
+ Plains, Ethiopia." Journal of Plant Biology & Crop Research
+ 5(1): 1046. Bahir Dar University / Amhara Regional Research.
+ Dera, Fogera, Libo Kemkem districts. Tebuconazole +
+ Difenoconazole 2-3 sprays optimal.
 
 39. Arba Minch University / SARI. "Effect of Integrated
-    Management on Purple Blotch (Alternaria porri (Ellis) Cif.)
-    Progression and Bulb Yield of Onion at Arba Minch in
-    Southern Ethiopia."
-    Tests six systemic + two non-systemic fungicides for
-    Purple Blotch Complex (A. porri + Stemphylium vesicarium).
+ Management on Purple Blotch (Alternaria porri (Ellis) Cif.)
+ Progression and Bulb Yield of Onion at Arba Minch in
+ Southern Ethiopia."
+ Tests six systemic + two non-systemic fungicides for
+ Purple Blotch Complex (A. porri + Stemphylium vesicarium).
 
 40. Northwestern Ethiopia Survey — Bahir Dar University Research
-    Group. "Cultural Management Practices for Onion Purple
-    Blotch." Documents practices reducing disease incidence:
-    early transplanting, plant after cereals, frequent plowing
-    (>4 times), smaller fields ≤0.25 ha.
+ Group. "Cultural Management Practices for Onion Purple
+ Blotch." Documents practices reducing disease incidence:
+ early transplanting, plant after cereals, frequent plowing
+ (>4 times), smaller fields ≤0.25 ha.
 
 41. Ethiopian Institute of Agricultural Research (EIAR).
-    "Onion Thrips (Thrips tabaci) Management Trials —
-    Central Rift Valley." Establishes 5-10 thrips/plant
-    economic threshold. Tests neem, Datura, Beauveria
-    bassiana botanical and biological controls.
+ "Onion Thrips (Thrips tabaci) Management Trials —
+ Central Rift Valley." Establishes 5-10 thrips/plant
+ economic threshold. Tests neem, Datura, Beauveria
+ bassiana botanical and biological controls.
 
 42. Bock K.R. (1964). "Purple blotch (Alternaria porri) of
-    onion in Kenya." Annals of Applied Biology 54:303-313.
-    [FOUNDATIONAL East African epidemiology reference]
-    Established temperature/humidity/leaf wetness triggers:
-    21-30°C + RH>75% + leaf wetness 8+ hr = disease.
+ onion in Kenya." Annals of Applied Biology 54:303-313.
+ [FOUNDATIONAL East African epidemiology reference]
+ Established temperature/humidity/leaf wetness triggers:
+ 21-30°C + RH>75% + leaf wetness 8+ hr = disease.
 
 CROP CONTEXT:
 - Critical Ethiopian vegetable crop and export commodity
 - Common varieties: Bombay Red, Adama Red, improved EIAR
-  releases
+ releases
 - Main production zones: Central Rift Valley (Meki, Ziway,
-  Adama), Amhara (Fogera Plains, Dera, Libo Kemkem),
-  Southern Ethiopia (Arba Minch)
+ Adama), Amhara (Fogera Plains, Dera, Libo Kemkem),
+ Southern Ethiopia (Arba Minch)
 - Fertilizer recommendation: 100 kg/ha NPS + 100 kg/ha UREA
 
 KEY DISEASES:
 1. Purple Blotch (Alternaria porri) — MOST IMPORTANT, up to
-   100% prevalence in some Fogera areas
+ 100% prevalence in some Fogera areas
 2. Downy Mildew (Peronospora destructor) — up to 80% loss
 3. Stemphylium Leaf Blight (S. vesicarium) — purple blotch
-   complex co-pathogen
+ complex co-pathogen
 4. White Rot (Sclerotium cepivorum)
 5. Basal Rot (Fusarium oxysporum f.sp. cepae)
 6. Neck Rot (postharvest)
 
 KEY PEST:
 - Onion Thrips (Thrips tabaci) — MOST COMMON, vectors
-  viruses, threshold 5-10/plant
+ viruses, threshold 5-10/plant
 
 KEY MANAGEMENT:
 - Purple Blotch: Tebuconazole (Natura 250 EW) or
-  Difenoconazole (Diprocon 33 EC), 2-3 sprays
+ Difenoconazole (Diprocon 33 EC), 2-3 sprays
 - Cultural (low-input): early transplanting (Dec),
-  plant after cereals, frequent plowing (>4×),
-  smaller fields ≤0.25 ha
+ plant after cereals, frequent plowing (>4×),
+ smaller fields ≤0.25 ha
 - Thrips: Neem, Datura (jimson weed), Beauveria
-  bassiana — rotate to avoid resistance
+ bassiana — rotate to avoid resistance
