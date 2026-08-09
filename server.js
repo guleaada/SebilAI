@@ -98,6 +98,25 @@ if (!ADMIN_KEY) {
   console.warn('   All admin endpoints (/api/feedback GET, /api/review-requests, /api/review-verify) will return 503 until it is configured.');
 }
 
+// ── WEB PUSH — was referenced but never required, which crashed the ──
+// process (ReferenceError) every time runDailyDiseaseCheck fired.
+// `webpush` stays null (the pre-existing `if (!webpush)` skip path in
+// sendPushNotification handles that) unless the module loads AND both
+// VAPID keys are set, in which case push notifications actually work.
+let webpush = null;
+try {
+  webpush = require('web-push');
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails('mailto:gulilatkasiye4@gmail.com', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
+  } else {
+    console.warn('⚠️  VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY not set — push notifications will be skipped.');
+    webpush = null;
+  }
+} catch (e) {
+  console.warn('⚠️  web-push module failed to load — push notifications will be skipped:', e.message);
+  webpush = null;
+}
+
 // ── ADDIS AI VOICE PROXY (Amharic / English / Oromo STT + TTS) ──
 // v12: Addis AI is being discontinued (paid product wind-down); their
 // /text-to-speech and /speech-to-text routes return 404 even with a valid
@@ -423,7 +442,7 @@ app.post('/api/drone-upload', express.raw({type: '*/*', limit: '20mb'}), async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEY },
         body: JSON.stringify({
-          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          model: 'qwen/qwen3.6-27b',
           messages: [{ role: 'user', content: [
             { type: 'text', text: 'Aerial farm image analysis. Crop: ' + crop + '. Identify disease hotspots, stress patterns, affected area %. JSON only: {"diagnosis":"name","confidence":80,"severity":"high|medium|low","affected_pct":15,"recommendation":"action"}' },
             { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64 } }
@@ -543,7 +562,7 @@ async function tryGroq(parts, satContext) {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
-      body: JSON.stringify({ model: 'meta-llama/llama-4-scout-17b-16e-instruct', messages: [{ role: 'user', content }], max_tokens: 1600, temperature: 0.3 }),
+      body: JSON.stringify({ model: 'qwen/qwen3.6-27b', messages: [{ role: 'user', content }], max_tokens: 1600, temperature: 0.3 }),
       signal: controller.signal
     });
     clearTimeout(t);
@@ -571,7 +590,7 @@ async function tryOpenRouter(parts, satContext) {
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENROUTER_KEY}`, 'HTTP-Referer': 'https://sebilai.com' },
-      body: JSON.stringify({ model: 'meta-llama/llama-3.2-11b-vision-instruct:free', messages: [{ role: 'user', content }], max_tokens: 1600 }),
+      body: JSON.stringify({ model: 'google/gemma-4-31b-it:free', messages: [{ role: 'user', content }], max_tokens: 1600 }),
       signal: controller.signal
     });
     clearTimeout(t);
@@ -1137,7 +1156,7 @@ app.post('/api/sms/incoming', async (req, res) => {
     const aiRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
-      body: JSON.stringify({ model: 'meta-llama/llama-4-scout-17b-16e-instruct', max_tokens: 80,
+      body: JSON.stringify({ model: 'qwen/qwen3.6-27b', max_tokens: 80,
         messages: [{ role: 'user', content: prompt }] })
     });
     const d = await aiRes.json();
@@ -1380,7 +1399,7 @@ Analyze the image and respond ONLY with valid JSON (no markdown):
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
         body: JSON.stringify({
-          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          model: 'qwen/qwen3.6-27b',
           max_tokens: 300,
           messages: [{ role: 'user', content: [
             { type: 'text', text: prompt },
