@@ -117,24 +117,60 @@ try {
   webpush = null;
 }
 
-// ── ADDIS AI VOICE PROXY (Amharic / English / Oromo STT + TTS) ──
-// v12: Addis AI is being discontinued (paid product wind-down); their
-// /text-to-speech and /speech-to-text routes return 404 even with a valid
-// key (confirmed via /api/v2/voice/diag: addis_ai_key_present:true,
-// upstream_status:404, "Route not found"). Until a replacement provider
-// is selected, the proxy is disabled and returns a clean 503 with a
-// machine-readable error code so the client can show the v11 toast
-// (no silent failures). English browser-speechSynthesis path is on the
-// client and is NOT affected by this flag.
-const VOICE_PROXY_ENABLED = false;
+// ── ADDIS AI VOICE PROXY (Amharic / Afaan Oromo STT + TTS) ──
+// CORRECTION: Addis AI is NOT discontinued. The earlier 404s were caused by a
+// wrong base URL ('/v1' + '/text-to-speech'), not a dead product — those paths
+// simply don't exist. Verified live against the real API with the deployed key:
+//   GET  /api/v1/voice/voices?language=am   → 200 (voice list)
+//   POST /api/v1/voice/generations          → 201 (clip + signed audio_url)
+//   POST /api/v2/stt                        → route exists (400 on bad audio)
+//   old  /v1/text-to-speech, /v1/speech-to-text → 404  ← the actual root cause
+//
+// Gotchas found by testing that the docs do NOT state correctly:
+//   • TTS and STT live on DIFFERENT API versions (v1 vs v2) — two base URLs.
+//   • client_request_id is REQUIRED, not optional (422 CLIENT_REQUEST_ID_REQUIRED).
+//   • Responses are wrapped in a top-level `data` object.
+//   • Language codes are 'am' / 'om' — NOT the BCP-47 'am-ET' / 'om-ET' the
+//     client sends, so they must be mapped.
+//   • Addis AI covers Amharic + Afaan Oromo only. English is handled entirely
+//     client-side by browser speechSynthesis and never reaches this proxy.
+const VOICE_PROXY_ENABLED = true;
 const ADDIS_AI_API_KEY = process.env.ADDIS_AI_API_KEY || '';
 if (!ADDIS_AI_API_KEY) {
   console.warn('⚠️  ADDIS_AI_API_KEY not set. Voice features will return 503.');
 }
-if (!VOICE_PROXY_ENABLED) {
-  console.warn('🔇 VOICE_PROXY_ENABLED=false → /api/v2/voice/{speak,transcribe} will return 503 (provider unavailable). /api/v2/voice/diag still works.');
+const ADDIS_AI_BASE_URL = 'https://api.addisassistant.com/api/v1'; // TTS + voices
+const ADDIS_AI_STT_URL  = 'https://api.addisassistant.com/api/v2/stt'; // STT (different version!)
+
+// Map the client's BCP-47 codes to Addis AI's short codes. Returns null for
+// anything Addis doesn't support (e.g. en-US, ti-ET) so callers can 400 cleanly.
+function toAddisLang(code) {
+  const c = String(code || '').toLowerCase();
+  if (c === 'am' || c.startsWith('am-')) return 'am';
+  if (c === 'om' || c.startsWith('om-')) return 'om';
+  return null;
 }
-const ADDIS_AI_BASE_URL = 'https://api.addisassistant.com/v1';
+
+// Voice IDs are account/catalogue dependent — query them, never hardcode.
+// Cached for an hour so we don't spend a round trip on every TTS request.
+const _voiceCache = { am: null, om: null, ts: 0 };
+async function getAddisVoiceId(lang) {
+  const now = Date.now();
+  if (_voiceCache[lang] && (now - _voiceCache.ts) < 3600000) return _voiceCache[lang];
+  const r = await fetch(`${ADDIS_AI_BASE_URL}/voice/voices?language=${encodeURIComponent(lang)}`, {
+    headers: { 'x-api-key': ADDIS_AI_API_KEY }
+  });
+  if (!r.ok) throw new Error(`voices lookup failed: HTTP ${r.status}`);
+  const body = await r.json();
+  const list = Array.isArray(body) ? body : (body.data || []);
+  const pick = list.find(v => v && v.is_available !== false && v.is_default)
+            || list.find(v => v && v.is_available !== false)
+            || list[0];
+  if (!pick || !pick.id) throw new Error('no available voice returned');
+  _voiceCache[lang] = pick.id;
+  _voiceCache.ts = now;
+  return pick.id;
+}
 
 const multer = require('multer');
 const upload = multer({
@@ -1911,45 +1947,60 @@ app.get('/api/v2/outbreaks/map', async (req, res) => {
 
 // ====================== VOICE: SPEECH-TO-TEXT (Addis AI proxy) ======================
 app.post('/api/v2/voice/transcribe', upload.single('audio'), async (req, res) => {
-  // v12: gated off until a replacement STT provider is selected.
   if (!VOICE_PROXY_ENABLED) {
     return res.status(503).json({
       error: 'voice_proxy_disabled',
-      message: 'Voice transcription is temporarily unavailable while we transition providers.',
+      message: 'Voice transcription is temporarily unavailable.',
       lang: req.body && req.body.language
     });
   }
+  // Clean 503 when the key is missing — the client shows its localized toast.
   if (!ADDIS_AI_API_KEY) {
-    return res.status(503).json({ error: 'Voice service not configured' });
+    return res.status(503).json({
+      error: 'voice_not_configured',
+      message: 'ADDIS_AI_API_KEY env var is missing on the server',
+      lang: req.body && req.body.language
+    });
   }
   if (!req.file) {
     return res.status(400).json({ error: 'No audio file provided' });
   }
   const language = req.body.language || 'am-ET';
-  const supported = ['am-ET', 'en-US', 'om-ET'];
-  if (!supported.includes(language)) {
-    return res.status(400).json({ error: 'Language not supported for voice yet', language });
+  const addisLang = toAddisLang(language);
+  if (!addisLang) {
+    return res.status(400).json({ error: 'language_not_supported', message: 'Addis AI supports Amharic (am) and Afaan Oromo (om) only', lang: language });
   }
 
   try {
+    // Verified contract: POST /api/v2/stt, x-api-key, multipart with an
+    // `audio` file plus a `request_data` JSON string holding language_code.
     const formData = new FormData();
     const blob = new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/webm' });
-    formData.append('file', blob, 'audio.webm');
-    formData.append('language', language);
+    formData.append('audio', blob, req.file.originalname || 'audio.webm');
+    formData.append('request_data', JSON.stringify({ language_code: addisLang }));
 
-    const r = await fetch(`${ADDIS_AI_BASE_URL}/speech-to-text`, {
+    const r = await fetch(ADDIS_AI_STT_URL, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${ADDIS_AI_API_KEY}` },
+      headers: { 'x-api-key': ADDIS_AI_API_KEY },
       body: formData
     });
 
+    const raw = await r.text();
     if (!r.ok) {
-      const errText = await r.text();
-      console.error('[AddisAI STT error]', r.status, errText);
-      return res.status(502).json({ error: 'Addis AI transcription failed', status: r.status });
+      console.error('[AddisAI STT error]', r.status, raw.slice(0, 400));
+      return res.status(502).json({
+        error: 'addis_ai_upstream_failed',
+        upstream_status: r.status,
+        upstream_body_excerpt: raw.slice(0, 400),
+        lang: language
+      });
     }
-    const data = await r.json();
-    res.json({ transcript: data.transcript || '', language });
+    let data = {};
+    try { data = JSON.parse(raw); } catch (e) {}
+    // Response shape: { status, data: { transcription, usage_metadata }, confidence }
+    const transcript = (data.data && data.data.transcription) || data.transcription || '';
+    console.log(`[STT] ok lang=${addisLang} chars=${transcript.length}`);
+    res.json({ transcript, language, confidence: data.confidence ?? null });
   } catch (err) {
     console.error('[STT route error]', err);
     res.status(500).json({ error: 'Transcription failed', detail: err.message });
@@ -1963,18 +2014,14 @@ app.post('/api/v2/voice/speak', express.json(), async (req, res) => {
   // (instead of silently falling back to browser TTS that has no am/om voice).
   console.log('[TTS] request received. ADDIS_AI_API_KEY set?', !!ADDIS_AI_API_KEY, 'lang=', (req.body && req.body.language));
 
-  // v12: gated off until a replacement TTS provider is selected.
-  // Addis AI returns 404 "Route not found" even with a valid key — the
-  // service is winding down. Return a clean 503 so the client's v11
-  // toast surfaces the "voice unavailable" message instead of trying
-  // and failing silently.
   if (!VOICE_PROXY_ENABLED) {
     return res.status(503).json({
       error: 'voice_proxy_disabled',
-      message: 'Voice playback is temporarily unavailable while we transition providers.',
+      message: 'Voice playback is temporarily unavailable.',
       lang: req.body && req.body.language
     });
   }
+  // Clean 503 when the key is missing — the client shows its localized toast.
   if (!ADDIS_AI_API_KEY) {
     return res.status(503).json({
       error: 'voice_not_configured',
@@ -1987,24 +2034,34 @@ app.post('/api/v2/voice/speak', express.json(), async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'Text must be a string under 2000 chars', lang: language });
   }
   const lang = language || 'am-ET';
-  const supported = ['am-ET', 'en-US', 'om-ET'];
-  if (!supported.includes(lang)) {
-    return res.status(400).json({ error: 'language_not_supported', message: 'Language not supported for voice yet', lang });
+  const addisLang = toAddisLang(lang);
+  if (!addisLang) {
+    return res.status(400).json({ error: 'language_not_supported', message: 'Addis AI supports Amharic (am) and Afaan Oromo (om) only', lang });
   }
 
   try {
-    const r = await fetch(`${ADDIS_AI_BASE_URL}/text-to-speech`, {
+    const voiceId = await getAddisVoiceId(addisLang);
+    // Verified contract: POST /api/v1/voice/generations, x-api-key.
+    // client_request_id is REQUIRED (422 without it) despite the docs calling
+    // it optional. Response is 201 with { data: { audio_url, audio, ... } }.
+    const r = await fetch(`${ADDIS_AI_BASE_URL}/voice/generations`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${ADDIS_AI_API_KEY}`
+        'x-api-key': ADDIS_AI_API_KEY
       },
-      body: JSON.stringify({ text, language: lang, speed: 1.0 })
+      body: JSON.stringify({
+        text,
+        voice_id: voiceId,
+        language: addisLang,
+        output_format: 'mp3_44100',
+        client_request_id: `sebilai-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      })
     });
 
+    const raw = await r.text();
     if (!r.ok) {
-      const errText = await r.text();
-      const excerpt = (errText || '').slice(0, 400);
+      const excerpt = (raw || '').slice(0, 400);
       console.error('[AddisAI TTS error] status=', r.status, 'body=', excerpt);
       return res.status(502).json({
         error: 'addis_ai_upstream_failed',
@@ -2014,9 +2071,36 @@ app.post('/api/v2/voice/speak', express.json(), async (req, res) => {
       });
     }
 
+    let body = {};
+    try { body = JSON.parse(raw); } catch (e) {}
+    const clip = body.data || body;
+    const audioUrl = clip.audio_url || null;
+    const inlineAudio = typeof clip.audio === 'string' ? clip.audio : null;
+
+    // Proxy the audio back as mp3 bytes so the client keeps its simple
+    // "fetch → blob → play" contract (no signed URL handling in the browser,
+    // and no CORS dependency on the CDN). Prefer the signed audio_url; fall
+    // back to the inline base64 data URI the API also returns.
+    let buf = null;
+    if (audioUrl) {
+      const ar = await fetch(audioUrl);
+      if (!ar.ok) {
+        console.error('[AddisAI TTS] audio_url fetch failed:', ar.status);
+        return res.status(502).json({ error: 'addis_ai_audio_fetch_failed', upstream_status: ar.status, lang });
+      }
+      buf = Buffer.from(await ar.arrayBuffer());
+    } else if (inlineAudio) {
+      buf = Buffer.from(inlineAudio.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    }
+
+    if (!buf || buf.length < 200) {
+      console.error('[AddisAI TTS] no usable audio in response');
+      return res.status(502).json({ error: 'addis_ai_no_audio', lang });
+    }
+
     res.setHeader('Content-Type', 'audio/mpeg');
-    const buf = Buffer.from(await r.arrayBuffer());
-    console.log('[TTS] success, bytes=', buf.length, 'lang=', lang);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    console.log(`[TTS] success, bytes=${buf.length} lang=${addisLang} voice=${voiceId} clip=${clip.id || 'n/a'}`);
     res.send(buf);
   } catch (err) {
     console.error('[TTS route network error]', err && err.message);
@@ -2038,23 +2122,28 @@ app.get('/api/v2/voice/diag', async (req, res) => {
   let upstreamReachable = null;
   let upstreamStatus = null;
   let upstreamBodyExcerpt = null;
+  let voiceCount = null;
+  let sampleVoiceId = null;
   try {
     if (hasKey) {
-      const r = await fetch(`${ADDIS_AI_BASE_URL}/text-to-speech`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${ADDIS_AI_API_KEY}`
-        },
-        body: JSON.stringify({ text: 'ሰላም', language: 'am-ET', speed: 1.0 })
+      // Probe the corrected base URL with the cheap, non-billed voices list
+      // (the old probe POSTed to a route that never existed → the 404s).
+      const r = await fetch(`${ADDIS_AI_BASE_URL}/voice/voices?language=am`, {
+        headers: { 'x-api-key': ADDIS_AI_API_KEY }
       });
       upstreamReachable = true;
       upstreamStatus = r.status;
+      const txt = await r.text();
       if (!r.ok) {
-        const txt = await r.text();
         upstreamBodyExcerpt = txt.slice(0, 400);
       } else {
-        upstreamBodyExcerpt = 'OK (audio bytes returned, not shown)';
+        try {
+          const body = JSON.parse(txt);
+          const list = Array.isArray(body) ? body : (body.data || []);
+          voiceCount = list.length;
+          sampleVoiceId = (list[0] || {}).id || null;
+        } catch (e) {}
+        upstreamBodyExcerpt = `OK (${voiceCount ?? '?'} voices available)`;
       }
     }
   } catch (err) {
@@ -2065,8 +2154,12 @@ app.get('/api/v2/voice/diag', async (req, res) => {
     addis_ai_key_present: hasKey,
     addis_ai_key_tail: keyTail,
     addis_ai_base_url: ADDIS_AI_BASE_URL,
+    addis_ai_stt_url: ADDIS_AI_STT_URL,
+    voice_proxy_enabled: VOICE_PROXY_ENABLED,
     upstream_reachable: upstreamReachable,
     upstream_status: upstreamStatus,
+    upstream_voice_count: voiceCount,
+    upstream_sample_voice_id: sampleVoiceId,
     upstream_body_excerpt: upstreamBodyExcerpt,
     timestamp: new Date().toISOString()
   });
