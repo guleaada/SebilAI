@@ -583,8 +583,12 @@ async function tryGroq(parts, satContext) {
         messages: [{ role: 'user', content }],
         max_tokens: 2400,   // headroom: reasoning tokens eat the budget before the JSON answer
         temperature: 0.4,
-        response_format: { type: 'json_object' }, // ≙ responseMimeType application/json
-        reasoning_effort: 'none'                  // ≙ thinkingBudget: 0 — suppress qwen <think>
+        // NOTE: do NOT add response_format: { type: 'json_object' } here.
+        // Groq 400s on it unless the prompt text literally contains "json",
+        // and the follow-up chat shares this route with conversational
+        // prompts that don't — every chat message would 400 and fall through
+        // the whole provider chain. Chat wants prose, not JSON, anyway.
+        reasoning_effort: 'none'  // ≙ thinkingBudget: 0 — suppress qwen <think> at the source
       }),
       signal: controller.signal
     });
@@ -618,8 +622,9 @@ async function tryOpenRouter(parts, satContext) {
         model: 'google/gemma-4-31b-it:free',
         messages: [{ role: 'user', content }],
         max_tokens: 2048,
-        temperature: 0.4,
-        response_format: { type: 'json_object' }
+        temperature: 0.4
+        // NOTE: no response_format here either — same shared-route reason as
+        // tryGroq above (the follow-up chat sends conversational prompts).
       }),
       signal: controller.signal
     });
