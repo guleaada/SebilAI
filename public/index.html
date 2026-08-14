@@ -8551,7 +8551,7 @@ Keep answers under 4 sentences. Use simple language the farmer can understand.`;
  clearTimeout(chatTimeout);
 
  const data = await response.json();
- const aiReply = data.candidates?.[0]?.(content && content.parts)?.[0]?.text || 'Sorry, I could not get a response.';
+ const aiReply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not get a response.';
 
  // Remove thinking indicator
  const thinkingEl = document.getElementById(thinkingId);

@@ -107,7 +107,7 @@ let webpush = null;
 try {
   webpush = require('web-push');
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    webpush.setVapidDetails('mailto:gulilatkasiye4@gmail.com', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
+    webpush.setVapidDetails('mailto:support@sebilai.com', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
   } else {
     console.warn('⚠️  VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY not set — push notifications will be skipped.');
     webpush = null;
@@ -451,7 +451,7 @@ app.post('/api/drone-upload', express.raw({type: '*/*', limit: '20mb'}), async (
       });
       if (droneRes.ok) {
         const dd = await droneRes.json();
-        const txt = (dd.choices && dd.choices[0] && dd.choices[0].message && dd.choices[0].message.content) || '';
+        const txt = stripThinking((dd.choices && dd.choices[0] && dd.choices[0].message && dd.choices[0].message.content) || '');
         try { analysis = JSON.parse(txt.replace(/```json|```/g,'').trim()); }
         catch(e) { analysis.recommendation = txt.substring(0,150); analysis.confidence = 70; }
       }
@@ -546,6 +546,22 @@ function enhancePrompt(parts, satContext) {
   });
 }
 
+// ── STRIP REASONING TAGS ──────────────────────────────────
+// qwen3.6 is a reasoning model: it emits <think>…</think> before its real
+// answer. That raw reasoning must never reach a farmer.
+//   • falsy in  → returned unchanged (caller decides)
+//   • an opening <think> with NO closing tag means the model truncated
+//     mid-thought and never produced a real answer → return '' so the
+//     caller treats it as a failure rather than showing half a monologue
+//   • otherwise strip all <think>…</think> blocks and trim
+function stripThinking(text) {
+  if (!text) return text;
+  const hasOpen  = /<think\b[^>]*>/i.test(text);
+  const hasClose = /<\/think\s*>/i.test(text);
+  if (hasOpen && !hasClose) return '';                       // truncated mid-thought
+  return text.replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, '').trim();
+}
+
 // ── GROQ (Primary) ────────────────────────────────────────
 async function tryGroq(parts, satContext) {
   if (!GROQ_KEY) return null;
@@ -562,15 +578,23 @@ async function tryGroq(parts, satContext) {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
-      body: JSON.stringify({ model: 'qwen/qwen3.6-27b', messages: [{ role: 'user', content }], max_tokens: 1600, temperature: 0.3 }),
+      body: JSON.stringify({
+        model: 'qwen/qwen3.6-27b',
+        messages: [{ role: 'user', content }],
+        max_tokens: 2400,   // headroom: reasoning tokens eat the budget before the JSON answer
+        temperature: 0.4,
+        response_format: { type: 'json_object' }, // ≙ responseMimeType application/json
+        reasoning_effort: 'none'                  // ≙ thinkingBudget: 0 — suppress qwen <think>
+      }),
       signal: controller.signal
     });
     clearTimeout(t);
     const data = await res.json();
     if (!res.ok) { console.error('❌ Groq:', data?.error?.message); return null; }
     const text = data.choices?.[0]?.message?.content || '';
-    console.log('✅ Groq success!');
-    return { candidates: [{ content: { parts: [{ text }] } }] };
+    const finishReason = data.choices?.[0]?.finish_reason || null;
+    console.log('✅ Groq success! finishReason:', finishReason);
+    return { candidates: [{ content: { parts: [{ text }] }, finishReason }] };
   } catch(e) { clearTimeout(t); console.error('Groq error:', e.message); return null; }
 }
 
@@ -590,15 +614,22 @@ async function tryOpenRouter(parts, satContext) {
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENROUTER_KEY}`, 'HTTP-Referer': 'https://sebilai.com' },
-      body: JSON.stringify({ model: 'google/gemma-4-31b-it:free', messages: [{ role: 'user', content }], max_tokens: 1600 }),
+      body: JSON.stringify({
+        model: 'google/gemma-4-31b-it:free',
+        messages: [{ role: 'user', content }],
+        max_tokens: 2048,
+        temperature: 0.4,
+        response_format: { type: 'json_object' }
+      }),
       signal: controller.signal
     });
     clearTimeout(t);
     const data = await res.json();
     if (!res.ok) { console.error('❌ OpenRouter:', data?.error?.message); return null; }
     const text = data.choices?.[0]?.message?.content || '';
-    console.log('✅ OpenRouter success!');
-    return { candidates: [{ content: { parts: [{ text }] } }] };
+    const finishReason = data.choices?.[0]?.finish_reason || null;
+    console.log('✅ OpenRouter success! finishReason:', finishReason);
+    return { candidates: [{ content: { parts: [{ text }] }, finishReason }] };
   } catch(e) { clearTimeout(t); console.error('OpenRouter error:', e.message); return null; }
 }
 
@@ -612,13 +643,32 @@ async function tryGemini(parts, satContext) {
     const t = setTimeout(() => controller.abort(), 10000); // fail fast instead of hanging
     try {
       console.log(`📡 Trying Gemini ${name}...`);
+      const generationConfig = {
+        temperature: 0.4,
+        maxOutputTokens: 2048,
+        responseMimeType: 'application/json'
+      };
+      // thinkingConfig is only valid on thinking-capable models (2.5+). Sending
+      // it to 2.0/1.5 returns 400 INVALID_ARGUMENT, which would kill the whole
+      // Gemini fallback tier — so only attach it where it's supported. These
+      // models don't emit <think> anyway, and stripThinking() catches strays.
+      if (/gemini-(2\.5|3)|thinking/i.test(name)) {
+        generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      }
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${name}:generateContent?key=${GEMINI_KEY}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: enhanced }], generationConfig: { temperature: 0.3, maxOutputTokens: 1600 } }),
+        body: JSON.stringify({ contents: [{ parts: enhanced }], generationConfig }),
         signal: controller.signal
       });
       clearTimeout(t);
-      if (res.ok) { console.log(`✅ Gemini ${name}!`); return res.json(); }
+      if (res.ok) {
+        const data = await res.json();
+        // Gemini already returns finishReason per candidate — pass through as
+        // is. Reasoning tags are stripped centrally at the /api/analyze
+        // response point (see stripThinking), same as the other providers.
+        console.log(`✅ Gemini ${name}! finishReason:`, data.candidates?.[0]?.finishReason || null);
+        return data;
+      }
       const err = await res.text();
       if (res.status === 400 || res.status === 403) {
         let msg = `Gemini error ${res.status}`;
@@ -988,6 +1038,26 @@ app.post('/api/analyze', async (req, res) => {
 
   if (result) {
     if (result._geminiError) return res.status(502).json({ error: result._geminiError });
+
+    // Strip reasoning tags before anything reaches the farmer. This single
+    // point also covers the follow-up chat feature, which reuses /api/analyze.
+    // An unterminated <think> means the model burned its budget reasoning and
+    // never produced an answer → stripThinking returns '' → treat as failure.
+    const part = result.candidates?.[0]?.content?.parts?.[0];
+    if (part && typeof part.text === 'string') {
+      part.text = stripThinking(part.text);
+    }
+
+    // finishReason rides along on every provider's candidates — log it on each
+    // call so truncation ("length"/"MAX_TOKENS") is visible in Fly logs.
+    const finishReason = result.candidates?.[0]?.finishReason ?? 'unknown';
+    const cleanText = part?.text || '';
+    console.log(`🧭 /api/analyze finishReason=${finishReason} textLen=${cleanText.length}`);
+
+    if (!cleanText.trim()) {
+      console.error('❌ /api/analyze: empty after stripping reasoning tags (truncated mid-thought)');
+      return res.status(503).json({ error: 'All AI models failed. Please try again.' });
+    }
     return res.json(result);
   }
   return res.status(503).json({ error: 'All AI models failed. Please try again.' });
@@ -1156,11 +1226,13 @@ app.post('/api/sms/incoming', async (req, res) => {
     const aiRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
-      body: JSON.stringify({ model: 'qwen/qwen3.6-27b', max_tokens: 80,
+      body: JSON.stringify({ model: 'qwen/qwen3.6-27b', max_tokens: 150,
         messages: [{ role: 'user', content: prompt }] })
     });
     const d = await aiRes.json();
-    const txt = d?.choices?.[0]?.message?.content?.trim();
+    // Strip reasoning BEFORE truncating — otherwise the 150-char SMS window
+    // would be filled with <think> monologue instead of the actual advice.
+    const txt = stripThinking(d?.choices?.[0]?.message?.content || '').trim();
     if (txt) reply = `SebilAI: ${txt.substring(0, 150)} sebilai.com`;
   } catch(e) {
     reply = `SebilAI: ${crop} issue noted. Check yellowing=water stress, spots=fungal, wilt=bacterial. Full diagnosis: sebilai.com`;
@@ -1408,7 +1480,7 @@ Analyze the image and respond ONLY with valid JSON (no markdown):
         })
       });
       const d = await r.json();
-      const text = d?.choices?.[0]?.message?.content?.trim().replace(/```json|```/g, '');
+      const text = stripThinking(d?.choices?.[0]?.message?.content || '').trim().replace(/```json|```/g, '');
       const parsed = JSON.parse(text);
       predictedYield = (parsed.estimated_yield_quintal_per_ha * ha).toFixed(1);
       confidence = parsed.confidence;
